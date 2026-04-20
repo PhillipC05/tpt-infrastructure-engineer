@@ -1,0 +1,1 @@
+fastapi uvicorn[standard] sqlalchemy psycopg2-binary python-multipart python-jose[cryptography] passlib[bcrypt] numpy scipy pandas geopandas shapely 
