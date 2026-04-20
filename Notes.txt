@@ -25,3 +25,52 @@ npm run dev
 ```
 
 ✅ Frontend will run at `http://localhost:5173`
+
+
+
+
+
+
+
+
+
+
+Postgres
+
+### 1. First, start PostgreSQL Service on Windows:
+
+Run this command in Administrator Command Prompt:
+
+```cmd
+net start postgresql-x64-16
+```
+
+*(Note: Version number may differ - if that fails, check services with `services.msc` and find the correct PostgreSQL service name)*
+
+### 2. Verify PostgreSQL is running:
+
+Check port 5432 is listening:
+
+```cmd
+netstat -ano | findstr :5432
+```
+
+### 3. Create the database:
+
+Once PostgreSQL is running, create the database first:
+
+```cmd
+psql -U postgres -c "CREATE DATABASE tpt_infrastructure;"
+```
+
+*(Default password will be `postgres` as configured in your connection string)*
+
+### 4. After database is created, your application will automatically create all tables on startup via this line (line 33):
+
+```python
+Base.metadata.create_all(bind=engine)
+```
+
+
+
+
