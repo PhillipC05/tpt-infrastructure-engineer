@@ -1,5 +1,6 @@
+import os
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
-from typing import Dict, Set
+from typing import Dict, Set, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
@@ -26,7 +27,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATABASE_URL = "postgresql://postgres:postgres@localhost/tpt_infrastructure"
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost/tpt_infrastructure"
+)
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

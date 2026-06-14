@@ -120,3 +120,16 @@ class MaterialsEngine:
     def calculate_material_cost(material_id: str, quantity: float) -> float:
         material = MATERIAL_DATABASE.get(material_id)
         return material.unit_cost * quantity if material else 0.0
+
+    @staticmethod
+    def get_material_waste_factor(material_id: str) -> float:
+        """Return standard waste allowance for a material (e.g. 0.05 = 5%)."""
+        WASTE_FACTORS: Dict[str, float] = {
+            "conc_20mpa": 0.05,
+            "conc_25mpa": 0.05,
+            "conc_30mpa": 0.05,
+            "steel_rebar_16mm": 0.08,
+            "timber_pine_rg15": 0.10,
+            "aggregate_gap20": 0.12,
+        }
+        return WASTE_FACTORS.get(material_id, 0.07)

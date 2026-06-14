@@ -152,10 +152,14 @@ CREATE TABLE project_comments (
     content TEXT NOT NULL,
     mentioned_users UUID[],
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_edited BOOLEAN DEFAULT FALSE,
+    is_archived BOOLEAN DEFAULT FALSE
 );
 
-CREATE TABLE project_files (
+CREATE INDEX idx_comments_project ON project_comments(project_id);
+
+CREATE TABLE project_attachments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     uploaded_by UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -164,7 +168,60 @@ CREATE TABLE project_files (
     file_size BIGINT NOT NULL,
     mime_type VARCHAR(100),
     file_hash CHAR(64),
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_archived BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX idx_attachments_project ON project_attachments(project_id);
+
+-- ==================================================
+-- DESIGNS
+-- ==================================================
+
+CREATE TABLE designs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) DEFAULT 'draft',
+    parameters JSONB NOT NULL,
+    score NUMERIC(5,2),
+    cost_estimate NUMERIC(15,2),
+    structural_rating INTEGER,
+    compliance_status VARCHAR(20),
+    drawing_data JSONB,
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_designs_project ON designs(project_id);
+
+CREATE TABLE design_alternatives (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    design_id UUID REFERENCES designs(id) ON DELETE CASCADE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    variant VARCHAR(10),
+    parameters JSONB NOT NULL,
+    score NUMERIC(5,2),
+    cost_estimate NUMERIC(15,2),
+    structural_rating INTEGER,
+    compliance_status VARCHAR(20),
+    is_selected BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_design_alternatives_design ON design_alternatives(design_id);
+
+CREATE TABLE validation_rules (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    standard VARCHAR(100),
+    condition JSONB NOT NULL,
+    severity VARCHAR(20) DEFAULT 'warning',
+    is_active BOOLEAN DEFAULT TRUE
 );
 
 -- ==================================================
@@ -195,3 +252,5 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER update_users_modtime BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_projects_modtime BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_organisations_modtime BEFORE UPDATE ON organisations FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_designs_modtime BEFORE UPDATE ON designs FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_comments_modtime BEFORE UPDATE ON project_comments FOR EACH ROW EXECUTE FUNCTION update_modified_column();

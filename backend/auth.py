@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -8,10 +9,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from models import User
 
-# Security Configuration
-SECRET_KEY = "YOUR_SECRET_KEY_HERE_GENERATE_RANDOM_64_CHAR"
+SECRET_KEY = os.environ["TPT_SECRET_KEY"]
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 480
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("TPT_TOKEN_EXPIRE_MINUTES", "480"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")

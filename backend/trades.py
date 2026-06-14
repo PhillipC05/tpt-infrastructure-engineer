@@ -138,3 +138,16 @@ class TradesEngine:
     def calculate_labour_cost(rate_id: str, hours: float) -> float:
         rate = next((r for r in LABOUR_DATABASE if r.id == rate_id), None)
         return rate.hourly_rate * hours if rate else 0.0
+
+    @staticmethod
+    def get_installation_labour_rate(material_id: str) -> float:
+        """Return per-unit installation labour cost for a given material ($/unit)."""
+        INSTALLATION_RATES: Dict[str, float] = {
+            "conc_20mpa": 85.0,
+            "conc_25mpa": 88.0,
+            "conc_30mpa": 92.0,
+            "steel_rebar_16mm": 2.40,
+            "timber_pine_rg15": 220.0,
+            "aggregate_gap20": 18.0,
+        }
+        return INSTALLATION_RATES.get(material_id, 50.0)
