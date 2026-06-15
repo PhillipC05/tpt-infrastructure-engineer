@@ -59,6 +59,7 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
     email_verified = Column(Boolean, default=False)
+    email_notifications_enabled = Column(Boolean, default=True)
 
     organisation = relationship("Organisation", back_populates="users")
     permissions = relationship("UserPermission", back_populates="user", cascade="all, delete-orphan")
@@ -238,3 +239,42 @@ class ValidationRule(Base):
     condition = Column(JSONB, nullable=False)
     severity = Column(String(20), default='warning')
     is_active = Column(Boolean, default=True)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    
+    notification_type = Column(String(100), nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(String)
+    
+    entity_type = Column(String(100))
+    entity_id = Column(UUID(as_uuid=True))
+    
+    sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    notification_metadata = Column(JSONB)
+    
+    is_read = Column(Boolean, default=False)
+    read_at = Column(DateTime(timezone=True))
+    
+    sent_email = Column(Boolean, default=False)
+    sent_push = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserMention(Base):
+    __tablename__ = "user_mentions"
+
+    id = Column(BigInteger, primary_key=True)
+    comment_id = Column(BigInteger, ForeignKey("project_comments.id", ondelete="CASCADE"), nullable=False)
+    mentioned_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    mentioned_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    
+    notification_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

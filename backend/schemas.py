@@ -104,3 +104,22 @@ class ProjectResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class NotificationResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    project_id: Optional[UUID]
+    notification_type: str
+    title: str
+    content: Optional[str]
+    entity_type: Optional[str]
+    entity_id: Optional[UUID]
+    sender_id: Optional[UUID]
+    notification_metadata: Optional[dict]
+    is_read: bool
+    read_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        orm_mode = True

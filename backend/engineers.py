@@ -1,3 +1,4 @@
+import math
 from typing import Dict, Any
 from pydantic import BaseModel
 
@@ -28,8 +29,8 @@ class EngineeringEngine:
         }
         
         soil = soil_parameters.get(params.soil_type, soil_parameters['granular'])
-        ka = (1 - __import__('math').sin(soil['phi'] * __import__('math').pi / 180)) / \
-             (1 + __import__('math').sin(soil['phi'] * __import__('math').pi / 180))
+        ka = (1 - math.sin(soil['phi'] * math.pi / 180)) / \
+             (1 + math.sin(soil['phi'] * math.pi / 180))
         
         active_force = 0.5 * ka * soil['gamma'] * params.height ** 2
         

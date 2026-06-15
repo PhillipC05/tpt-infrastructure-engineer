@@ -1,0 +1,65 @@
+# TPT Infrastructure Engineer - Desktop / Production Deployment (Phase 19)
+# Works on normal Windows / Mac / Linux desktops with Docker Desktop installed
+version: '3.8'
+
+volumes:
+  postgres_data:
+  app_uploads:
+
+services:
+  # Frontend Application
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "5173:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  # Backend Application
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-tpt_user}:${POSTGRES_PASSWORD:-tpt_password}@postgres:5432/${POSTGRES_DB:-tpt_db}
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - app_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-tpt_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-tpt_password}
+      - POSTGRES_DB=${POSTGRES_DB:-tpt_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tpt_user -d tpt_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

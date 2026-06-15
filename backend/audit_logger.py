@@ -54,3 +54,6 @@ class AuditLogger:
 
     def log_access(self, entity_type: str, entity_id: str, request: Request = None):
         self.log("access", entity_type, entity_id, None, None, request)
+
+    def log_action(self, action: str, entity_type: str = None, entity_id: str = None, request: Request = None):
+        self.log(action, entity_type, entity_id, None, None, request)

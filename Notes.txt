@@ -1,5 +1,16 @@
 ### How to run locally:
 
+#### 0. __Prerequisites__
+
+- Python 3.12+
+- Node.js 20+
+- PostgreSQL 16 with PostGIS 3.4
+
+Copy the environment template and adjust as needed:
+```bash
+cp backend/.env.example .env
+```
+
 #### 1. __Install root dependencies__
 
 ```bash
@@ -25,6 +36,24 @@ npm run dev
 ```
 
 ✅ Frontend will run at `http://localhost:5173`
+
+---
+
+### Database Setup
+
+PostgreSQL must be running with PostGIS extension. Create the database:
+
+```cmd
+psql -U postgres -c "CREATE DATABASE tpt_infrastructure;"
+```
+
+Tables are managed via Alembic migrations. To apply:
+```bash
+cd backend
+alembic upgrade head
+```
+
+For development, the application will auto-create tables on first run.
 
 
 
@@ -65,11 +94,14 @@ psql -U postgres -c "CREATE DATABASE tpt_infrastructure;"
 
 *(Default password will be `postgres` as configured in your connection string)*
 
-### 4. After database is created, your application will automatically create all tables on startup via this line (line 33):
+### 4. Apply database migrations:
 
-```python
-Base.metadata.create_all(bind=engine)
+```bash
+cd backend
+alembic upgrade head
 ```
+
+Or let the application auto-create tables on first run during development.
 
 
 

@@ -21,6 +21,7 @@ class ReportType(str, Enum):
     COMPLIANCE = "compliance"
     SCHEDULE = "schedule"
     RISK_ASSESSMENT = "risk_assessment"
+    TRADE_BREAKDOWN = "trade_breakdown"
 
 
 class ReportFormat(str, Enum):
@@ -156,6 +157,23 @@ class ReportGenerator:
                     ReportSection(section_id="safety_plan", title="Health & Safety Plan", order=3, required=True),
                     ReportSection(section_id="quality_control", title="Quality Control Measures", order=4),
                     ReportSection(section_id="site_layout", title="Site Layout Plan", order=5),
+                ]
+            ),
+            "trade_breakdown_standard": ReportTemplate(
+                template_id="trade_breakdown_standard",
+                name="Trade Breakdown Report",
+                report_type=ReportType.TRADE_BREAKDOWN,
+                sections=[
+                    ReportSection(section_id="summary", title="Trade Summary", order=1, required=True),
+                    ReportSection(section_id="civil", title="Civil Works", order=2),
+                    ReportSection(section_id="structural", title="Structural Works", order=3),
+                    ReportSection(section_id="architectural", title="Architectural Works", order=4),
+                    ReportSection(section_id="mechanical", title="Mechanical Works", order=5),
+                    ReportSection(section_id="electrical", title="Electrical Works", order=6),
+                    ReportSection(section_id="plumbing", title="Plumbing & Drainage", order=7),
+                    ReportSection(section_id="external", title="External Works", order=8),
+                    ReportSection(section_id="labour_summary", title="Labour Summary", order=9),
+                    ReportSection(section_id="programme", title="Trade Programme", order=10, required=True),
                 ]
             )
         }
