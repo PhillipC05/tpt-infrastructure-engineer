@@ -3,12 +3,19 @@ Phase 9: INTEGRATION & ADVANCED FEATURES Module
 Third party integrations and advanced platform capabilities for TPT Infrastructure Engineer
 """
 
+import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from enum import Enum
 from pydantic import BaseModel, Field
 import uuid
 import json
+
+# ── AI configuration (all optional) ─────────────────────────────────────────
+AI_ENABLED = os.getenv("AI_ENABLED", "false").lower() == "true"
+AI_API_URL = os.getenv("AI_API_URL", "")
+AI_API_KEY = os.getenv("AI_API_KEY", "")
+AI_MODEL = os.getenv("AI_MODEL", "llama3")
 
 
 class IntegrationType(str, Enum):
@@ -345,84 +352,150 @@ class IntegrationSystem:
     
     def ai_engineering_assistant(self, question: str, context_project_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        AI Assistant for engineering questions
-        Provides contextual answers based on project data, engineering standards and code requirements
+        Engineering assistant — rule-based by default, LLM-powered when AI is configured.
+        Set AI_ENABLED=true + AI_API_URL in .env to activate the LLM path.
         """
-        
-        question_lower = question.lower()
+        if AI_ENABLED and AI_API_URL:
+            return self._ai_llm_response(question, context_project_id)
+        return self._rule_based_response(question, context_project_id)
+
+    def _ai_llm_response(self, question: str, context_project_id: Optional[str]) -> Dict[str, Any]:
+        """Call an OpenAI-compatible endpoint for a real LLM answer."""
+        try:
+            import urllib.request
+            system_prompt = (
+                "You are an expert civil and structural engineer specialising in AS/NZS standards. "
+                "Answer concisely with specific values, unit references, and standard citations."
+            )
+            payload = json.dumps({
+                "model": AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": question},
+                ],
+                "temperature": 0.2,
+            }).encode()
+            headers = {"Content-Type": "application/json"}
+            if AI_API_KEY:
+                headers["Authorization"] = f"Bearer {AI_API_KEY}"
+            req = urllib.request.Request(f"{AI_API_URL}/chat/completions", data=payload, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            answer = data["choices"][0]["message"]["content"]
+            return {
+                "question": question,
+                "context_project_id": context_project_id,
+                "response": answer,
+                "confidence": 0.90,
+                "mode": "ai",
+                "model": AI_MODEL,
+                "sources": ["LLM"],
+                "references": [],
+                "generated_at": datetime.utcnow().isoformat(),
+            }
+        except Exception as exc:
+            fallback = self._rule_based_response(question, context_project_id)
+            fallback["mode"] = "ai_fallback"
+            fallback["ai_error"] = str(exc)
+            return fallback
+
+    def _rule_based_response(self, question: str, context_project_id: Optional[str]) -> Dict[str, Any]:
+        """Deterministic rule-based engineering knowledge base (no AI required)."""
+        q = question.lower()
         response = ""
-        references = []
+        references: List[str] = []
         confidence = 0.7
-        
-        # Concrete engineering knowledge base
-        if 'concrete' in question_lower and 'strength' in question_lower:
-            response = """
-            Standard concrete strength classes:
-            - C16/20: Residential slabs, footings (20MPa characteristic)
-            - C20/25: General structural elements (25MPa)
-            - C25/30: Beams, columns, suspended slabs (30MPa)
-            - C32/40: High load structures, bridges (40MPa)
-            - C40/50: Pre-stressed concrete (50MPa)
-            
-            Minimum cement content: 240 kg/m³
-            Maximum water/cement ratio: 0.65
-            """
-            references = ["AS 3600-2018 Concrete Structures", "NZS 3101:2006"]
+
+        if "concrete" in q and "strength" in q:
+            response = (
+                "Standard concrete strength classes (AS 3600 / NZS 3101):\n"
+                "• C16/20 — residential slabs & footings (20 MPa char.)\n"
+                "• C20/25 — general structural elements (25 MPa)\n"
+                "• C25/30 — beams, columns, suspended slabs (30 MPa)\n"
+                "• C32/40 — high-load structures, bridges (40 MPa)\n"
+                "• C40/50 — pre-stressed concrete (50 MPa)\n\n"
+                "Min cement content: 240 kg/m³ | Max w/c ratio: 0.65"
+            )
+            references = ["AS 3600-2018", "NZS 3101:2006"]
             confidence = 0.95
-        
-        elif 'steel' in question_lower and 'grade' in question_lower:
-            response = """
-            Standard structural steel grades:
-            - Grade 300: Mild steel, general purpose (300MPa yield)
-            - Grade 350: Standard structural grade (350MPa yield)
-            - Grade 450: High strength structural steel (450MPa yield)
-            - Grade 550: Reinforcing bar (550MPa yield)
-            
-            Modulus of Elasticity: 200 GPa
-            Poisson Ratio: 0.3
-            """
+
+        elif "steel" in q and "grade" in q:
+            response = (
+                "Structural steel grades (AS/NZS 3679.1):\n"
+                "• Grade 250 — light sections, gussets\n"
+                "• Grade 300 — general purpose (300 MPa yield)\n"
+                "• Grade 350 — standard structural (350 MPa yield)\n"
+                "• Grade 450 — high strength (450 MPa yield)\n\n"
+                "E = 200 GPa | ν = 0.3 | α = 12×10⁻⁶ /°C"
+            )
             references = ["AS/NZS 3679.1:2016", "AS/NZS 4671:2001"]
             confidence = 0.92
-        
-        elif 'excavation' in question_lower or 'trench' in question_lower:
-            response = """
-            Standard excavation batter angles:
-            - Rock: 1:0.5 (63°)
-            - Stiff clay: 1:1 (45°)
-            - Medium clay: 1:1.5 (33°)
-            - Sand / Gravel: 1:2 (26°)
-            - Saturated sand: 1:3 (18°)
-            
-            Trench shoring is required for trenches over 1.5m depth.
-            """
-            references = ["AS 2870-2011 Residential Slabs and Footings", "WorkSafe Excavation Guidelines"]
+
+        elif "excavation" in q or "trench" in q:
+            response = (
+                "Standard batter angles:\n"
+                "• Rock: 1H:0.5V (63°)\n"
+                "• Stiff clay: 1H:1V (45°)\n"
+                "• Medium clay: 1H:1.5V (33°)\n"
+                "• Sand/gravel: 1H:2V (26°)\n"
+                "• Saturated sand: 1H:3V (18°)\n\n"
+                "Trench shoring required for depths > 1.5 m (WorkSafe)."
+            )
+            references = ["AS 2870-2011", "WorkSafe Excavation Guidelines"]
             confidence = 0.88
-        
-        elif 'weather' in question_lower and 'concrete' in question_lower:
-            response = """
-            Do not pour concrete if:
-            - Ambient temperature < 5°C without winter concreting procedures
-            - Rain is forecast within 6 hours
-            - Wind speed > 30 km/h causing rapid evaporation
-            - Temperature > 35°C without hot weather concreting measures
-            
-            Minimum curing time: 7 days for normal concrete
-            """
-            references = ["ACI 305R Hot Weather Concreting", "ACI 306R Cold Weather Concreting"]
+
+        elif "weather" in q and "concrete" in q:
+            response = (
+                "Avoid pouring concrete when:\n"
+                "• Temp < 5°C (without cold-weather procedures)\n"
+                "• Rain forecast within 6 hours\n"
+                "• Wind > 30 km/h (rapid evaporation)\n"
+                "• Temp > 35°C (without hot-weather measures)\n\n"
+                "Min curing: 7 days normal / 3 days with accelerator."
+            )
+            references = ["ACI 305R", "ACI 306R"]
             confidence = 0.91
-        
+
+        elif "retaining wall" in q or "retaining" in q:
+            response = (
+                "Retaining wall design checklist (AS 4678):\n"
+                "• Embedment ≥ 30% of retained height\n"
+                "• Drainage layer behind wall mandatory\n"
+                "• Stability: OT ratio ≥ 1.5, sliding ratio ≥ 1.5\n"
+                "• Surcharge allowance: min 5 kPa residential\n"
+                "• Walls > 1.5 m require engineer sign-off"
+            )
+            references = ["AS 4678-2002"]
+            confidence = 0.90
+
+        elif "foundation" in q or "footing" in q:
+            response = (
+                "Foundation sizing rules of thumb (AS 2870):\n"
+                "• Strip footing width ≥ 3 × wall thickness\n"
+                "• Min depth: 300 mm (frost-free in NZ: 450 mm)\n"
+                "• Bearing capacity: clay 75–200 kPa, rock 1000+ kPa\n"
+                "• Settlement limit: 25 mm total, 15 mm differential"
+            )
+            references = ["AS 2870-2011", "NZS 3604:2011"]
+            confidence = 0.89
+
         else:
-            response = "This question requires project specific context. Please provide project ID for contextual engineering advice."
-            confidence = 0.4
-        
+            response = (
+                "I don't have a specific rule for that question in my built-in knowledge base. "
+                "Enable AI mode (set AI_ENABLED=true in .env) for open-ended engineering queries, "
+                "or ask about: concrete strength, steel grades, excavation, retaining walls, foundations, or weather concreting."
+            )
+            confidence = 0.35
+
         return {
-            'question': question,
-            'context_project_id': context_project_id,
-            'response': response.strip(),
-            'confidence': confidence,
-            'sources': ['Engineering Standards Database'],
-            'references': references,
-            'generated_at': datetime.utcnow().isoformat()
+            "question": question,
+            "context_project_id": context_project_id,
+            "response": response,
+            "confidence": confidence,
+            "mode": "rule_based",
+            "sources": ["Engineering Standards Database"],
+            "references": references,
+            "generated_at": datetime.utcnow().isoformat(),
         }
 
 

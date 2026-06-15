@@ -1274,35 +1274,128 @@ async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str, 
         manager.disconnect(websocket, project_id)
 
 
-# ------------------------------
-# Health Check Endpoints
-# ------------------------------
-@app.get("/health", status_code=status.HTTP_200_OK)
-@limiter.limit("100/minute")
-async def health_check(request: Request):
+# ==============================================================================
+# Compliance, Anomaly Detection & AI Assistant
+# ==============================================================================
+from compliance import compliance_engine
+from anomaly import anomaly_engine
+from integrations import integration_system, AI_ENABLED
+
+
+@app.get("/api/ai/status")
+async def ai_status():
+    """Returns whether the optional AI integration is configured and active."""
     return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0"
+        "ai_enabled": AI_ENABLED,
+        "mode": "ai" if AI_ENABLED else "rule_based",
+        "info": (
+            "AI features active — set AI_ENABLED=false to disable."
+            if AI_ENABLED
+            else "Running in rule-based mode. Set AI_ENABLED=true in .env to activate AI features."
+        ),
     }
 
-@app.get("/health/detailed", status_code=status.HTTP_200_OK)
-@limiter.limit("10/minute")
-async def detailed_health_check(request: Request, db: Session = Depends(get_db)):
-    try:
-        db.execute(text("SELECT 1"))
-        db_status = "healthy"
-    except Exception:
-        db_status = "unhealthy"
+
+@app.post("/api/compliance/check")
+async def check_compliance(payload: dict, current_user: User = Depends(get_current_user)):
+    """
+    Validate design parameters against AS/NZS standards.
+    Body: { "design_type": "retaining_wall", "params": { ... } }
+    """
+    design_type = payload.get("design_type", "")
+    params = payload.get("params", {})
+    return compliance_engine.check(design_type, params)
+
+
+@app.get("/api/compliance/design-types")
+async def list_design_types():
+    return {
+        "design_types": [
+            {"id": "retaining_wall",   "label": "Retaining Wall",    "standard": "AS 4678-2002"},
+            {"id": "strip_foundation", "label": "Strip Foundation",   "standard": "AS 2870-2011"},
+            {"id": "box_culvert",      "label": "Box Culvert",        "standard": "AS/NZS 1597.2"},
+            {"id": "stormwater_pipe",  "label": "Stormwater Pipe",    "standard": "AS/NZS 3500.3"},
+        ]
+    }
+
+
+@app.post("/api/anomaly/analyse")
+async def analyse_anomalies(payload: dict, current_user: User = Depends(get_current_user)):
+    """
+    Detect cost anomalies in line-item unit rates.
+    Body: { "rates": { "conc_25mpa": 410.0, "steel_rebar_16mm": 4.80, ... } }
+    """
+    rates = payload.get("rates", {})
+    result = anomaly_engine.analyse(rates)
+    anomaly_engine.record_rates(rates)  # feed back into rolling baseline
+    return result
+
+
+@app.post("/api/assistant/ask")
+async def ask_assistant(payload: dict, current_user: User = Depends(get_current_user)):
+    """
+    Engineering Q&A. Rule-based by default; LLM-powered when AI_ENABLED=true.
+    Body: { "question": "...", "project_id": "..." (optional) }
+    """
+    question = payload.get("question", "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+    project_id = payload.get("project_id")
+    return integration_system.ai_engineering_assistant(question, context_project_id=project_id)
+
+
+@app.post("/api/carbon/calculate")
+async def calculate_carbon(payload: dict, current_user: User = Depends(get_current_user)):
+    """
+    Calculate carbon footprint from a materials breakdown.
+    Body: { "materials": { "conc_25mpa": 24.0, "steel_rebar_16mm": 440.0, ... } }
+    Returns Scope 1/2/3 breakdown and industry benchmark comparison.
+    """
+    from materials import MaterialsEngine, MATERIAL_DATABASE
+
+    materials: dict = payload.get("materials", {})
+    project_area_m2: float = float(payload.get("project_area_m2", 1.0))
+
+    scope1 = 0.0  # direct fuel / on-site combustion
+    scope2 = 0.0  # electricity (formwork machinery etc.)
+    scope3 = 0.0  # embodied carbon in materials
+
+    breakdown = {}
+    for mat_id, qty in materials.items():
+        carbon = MaterialsEngine.calculate_carbon_footprint(mat_id, qty)
+        material = MATERIAL_DATABASE.get(mat_id)
+        category = material.category.value if material else "other"
+        breakdown[mat_id] = {"carbon_tCO2": round(carbon, 3), "category": category, "qty": qty}
+        scope3 += carbon
+
+    # Approximate Scope 1 from plant fuel (0.08 tCO2/hr × estimated hrs)
+    plant_hrs = float(payload.get("plant_hours_total", 0))
+    scope1 = plant_hrs * 0.08
+
+    total = scope1 + scope2 + scope3
+    intensity = round(total / project_area_m2, 4) if project_area_m2 else 0
+
+    # Industry benchmarks (tCO2/m²)
+    benchmarks = {
+        "retaining_wall": 0.12,
+        "road_construction": 0.08,
+        "building_structure": 0.25,
+        "bridge": 0.35,
+    }
+    project_type = payload.get("project_type", "retaining_wall")
+    benchmark = benchmarks.get(project_type, 0.15)
+    vs_benchmark_pct = round((intensity - benchmark) / benchmark * 100, 1) if benchmark else 0
 
     return {
-        "status": "healthy" if db_status == "healthy" else "degraded",
-        "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0",
-        "checks": {
-            "database": db_status,
-            "api": "healthy"
-        }
+        "scope1_tCO2": round(scope1, 3),
+        "scope2_tCO2": round(scope2, 3),
+        "scope3_tCO2": round(scope3, 3),
+        "total_tCO2": round(total, 3),
+        "intensity_tCO2_per_m2": intensity,
+        "benchmark_tCO2_per_m2": benchmark,
+        "vs_benchmark_pct": vs_benchmark_pct,
+        "rating": "good" if vs_benchmark_pct <= -10 else ("average" if vs_benchmark_pct <= 10 else "high"),
+        "breakdown": breakdown,
     }
 
 

@@ -1,0 +1,19 @@
+{
+  "name": "TPT Infrastructure Engineer",
+  "short_name": "TPT Infra",
+  "description": "End-to-end platform for infrastructure planning, design, costing and reporting",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9fafb",
+  "theme_color": "#1e3a5f",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "lang": "en-NZ"
+}
