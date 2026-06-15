@@ -1,14 +1,14 @@
 {
   "name": "tpt-infrastructure-engineer",
   "version": "1.0.0",
-  "description": "",
+  "description": "End-to-end infrastructure engineering platform for project management, cost estimation, scheduling, and CAD/BIM workflows",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["infrastructure", "engineering", "fastapi", "react", "typescript", "postgis"],
+  "author": "Phillip T",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@headlessui/react": "^2.2.10",
