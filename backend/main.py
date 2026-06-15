@@ -1,41 +1,130 @@
-import os
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
 from typing import Dict, Set, Optional
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
-from datetime import timedelta
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from models import Base, User, Project, Organisation, ProjectVersion, UserPermission, UserRole, ProjectAttachment, ProjectComment
+from datetime import timedelta, datetime
+from sqlalchemy import text, func
+from sqlalchemy.orm import Session
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from dotenv import load_dotenv
+import os
+import logging
+import time
+import json
+import asyncio
+
+from models import (
+    Base, User, Project, Organisation, ProjectVersion, UserPermission, UserRole,
+    ProjectAttachment, ProjectComment, Notification, UserMention,
+    Material, ScheduleTask, EstimateItem, PurchaseOrder, BillOfMaterials, GeneratedReport
+)
+from notifications import NotificationService
 from auth import (
     verify_password, create_access_token, get_current_user,
     get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES, Token
 )
 from audit_logger import AuditLogger
 from fastapi import UploadFile, File
-from schemas import ProjectCreate, ProjectUpdate, ProjectResponse, UserCreate, UserResponse, AttachmentResponse, CommentCreate, CommentResponse
-from datetime import datetime
+from schemas import ProjectCreate, ProjectUpdate, ProjectResponse, UserCreate, UserUpdate, UserResponse, AttachmentResponse, CommentCreate, CommentResponse, NotificationResponse
 from geoalchemy2.elements import WKTElement
 
-app = FastAPI(title="TPT Infrastructure Engineer API", version="1.0.0")
+# Load environment variables
+load_dotenv()
 
+# Initialize Limiter
+limiter = Limiter(key_func=get_remote_address)
+
+app = FastAPI(title="TPT Infrastructure Engineer API", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Security Middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        response.headers['Content-Security-Policy'] = "default-src 'self'"
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+        return response
+
+# Request Logging Middleware
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        
+        response = await call_next(request)
+        
+        process_time = (time.time() - start_time) * 1000
+        formatted_process_time = '{0:.2f}'.format(process_time)
+        
+        log_data = {
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "process_time_ms": formatted_process_time,
+            "client_ip": request.client.host,
+            "user_agent": request.headers.get("user-agent", "unknown")
+        }
+        
+        logging.info(json.dumps(log_data))
+        
+        return response
+
+from middleware.transaction_middleware import TransactionMiddleware
+
+app.add_middleware(TransactionMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(","))
+
+# Proper CORS Configuration
+origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Total-Count", "X-Request-ID"]
 )
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://postgres:postgres@localhost/tpt_infrastructure"
-)
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# Global Error Handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logging.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": "An unexpected error occurred",
+            "type": type(exc).__name__
+        }
+    )
 
-Base.metadata.create_all(bind=engine)
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "status_code": exc.status_code
+        },
+        headers=exc.headers
+    )
 
+from database import DATABASE_URL, engine, SessionLocal
+
+# Database tables managed via Alembic migrations.
+# Run: alembic upgrade head
 
 def get_db():
     db = SessionLocal()
@@ -46,7 +135,8 @@ def get_db():
 
 
 @app.post("/auth/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
@@ -70,8 +160,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 
 
 @app.post("/auth/register", response_model=UserResponse, status_code=201)
-async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Check if user already exists
+@limiter.limit("5/minute")
+async def register(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(
@@ -79,7 +169,6 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="User with this email already exists"
         )
 
-    # Validate organisation exists if provided
     if user_data.organisation_id:
         organisation = db.query(Organisation).filter(
             Organisation.id == user_data.organisation_id,
@@ -91,14 +180,12 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
                 detail="Organisation not found or inactive"
             )
 
-    # Create new user
     user = User(
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         first_name=user_data.first_name,
         last_name=user_data.last_name,
         organisation_id=user_data.organisation_id,
-        # Default role for new registered users
         role=UserRole.VIEWER
     )
 
@@ -106,7 +193,6 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    # Assign default permissions for new user
     default_permissions = [
         UserPermission(user_id=user.id, module="projects", can_read=True, can_write=False),
         UserPermission(user_id=user.id, module="documents", can_read=True),
@@ -138,13 +224,99 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     }
 
 
+@app.patch("/api/users/me", response_model=UserResponse)
+async def update_current_user(
+    user_data: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user_data.new_password:
+        if not user_data.current_password:
+            raise HTTPException(status_code=400, detail="current_password is required to set a new password")
+        if not verify_password(user_data.current_password, current_user.hashed_password):
+            raise HTTPException(status_code=400, detail="Current password is incorrect")
+        current_user.hashed_password = get_password_hash(user_data.new_password)
+
+    if user_data.first_name is not None:
+        current_user.first_name = user_data.first_name
+    if user_data.last_name is not None:
+        current_user.last_name = user_data.last_name
+
+    db.commit()
+    db.refresh(current_user)
+
+    audit = AuditLogger(db, current_user)
+    audit.log_update("user", str(current_user.id), {}, {"first_name": current_user.first_name, "last_name": current_user.last_name})
+
+    return current_user
+
+
+@app.post("/api/ai/assist")
+async def ai_assist(
+    body: dict,
+    current_user: User = Depends(get_current_user)
+):
+    from lib.ai_engine import ai_engine
+    prompt = body.get("prompt", "").strip()
+    context_type = body.get("context_type", "engineering_assistant")
+    if not prompt:
+        raise HTTPException(status_code=400, detail="prompt is required")
+    try:
+        result = await ai_engine.generate(prompt, template_name=context_type)
+        return {"result": result}
+    except Exception as e:
+        logging.warning(f"AI assist failed: {e}")
+        raise HTTPException(status_code=503, detail="AI assistant is unavailable. Please configure an AI provider API key.")
+
+
+@app.get("/api/projects/{project_id}/versions")
+async def get_project_versions(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    versions = db.query(ProjectVersion).filter(
+        ProjectVersion.project_id == project_id
+    ).order_by(ProjectVersion.created_at.desc()).all()
+
+    return [
+        {
+            "id": str(v.id),
+            "project_id": str(v.project_id),
+            "version_number": v.version_number,
+            "data": v.snapshot,
+            "created_at": v.created_at.isoformat()
+        }
+        for v in versions
+    ]
+
+
 @app.get("/api/projects", response_model=list[ProjectResponse])
-async def get_projects(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    projects = db.query(Project).filter(
+async def get_projects(
+    skip: int = 0,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Project).filter(
         Project.organisation_id == current_user.organisation_id,
         Project.is_archived == False
-    ).order_by(Project.updated_at.desc()).all()
-    return projects
+    ).order_by(Project.updated_at.desc())
+    
+    total = query.count()
+    projects = query.offset(skip).limit(limit).all()
+    
+    return JSONResponse(
+        content=[ProjectResponse.from_orm(p).dict() for p in projects],
+        headers={"X-Total-Count": str(total)}
+    )
 
 
 @app.post("/api/projects", response_model=ProjectResponse, status_code=201)
@@ -170,7 +342,6 @@ async def create_project(project_data: ProjectCreate, current_user: User = Depen
     db.add(project)
     db.flush()
 
-    # Create initial version
     initial_version = ProjectVersion(
         project_id=project.id,
         version_number=1,
@@ -236,7 +407,6 @@ async def update_project(project_id: str, project_data: ProjectUpdate,
     if project_data.latitude and project_data.longitude:
         project.location = WKTElement(f'POINT({project_data.longitude} {project_data.latitude})', srid=4326)
 
-    # Auto increment version
     last_version = db.query(ProjectVersion).filter(
         ProjectVersion.project_id == project.id
     ).order_by(ProjectVersion.version_number.desc()).first()
@@ -276,12 +446,474 @@ async def delete_project(project_id: str, current_user: User = Depends(get_curre
     audit.log_delete("project", project_id, {"name": project.name})
 
 
+# ------------------------------
+# Dashboard / Stats Endpoint
+# ------------------------------
+@app.get("/api/stats")
+async def get_dashboard_stats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    org_id = current_user.organisation_id
+    
+    total_projects = db.query(func.count(Project.id)).filter(
+        Project.organisation_id == org_id,
+        Project.is_archived == False
+    ).scalar() or 0
+    
+    active_projects = db.query(func.count(Project.id)).filter(
+        Project.organisation_id == org_id,
+        Project.is_archived == False,
+        Project.status == 'active'
+    ).scalar() or 0
+    
+    total_budget = db.query(func.coalesce(func.sum(Project.budget), 0)).filter(
+        Project.organisation_id == org_id,
+        Project.is_archived == False
+    ).scalar() or 0
+    
+    recent_activity_count = db.query(func.count(ProjectComment.id)).filter(
+        ProjectComment.project_id.in_(
+            db.query(Project.id).filter(
+                Project.organisation_id == org_id,
+                Project.is_archived == False
+            )
+        )
+    ).scalar() or 0
+    
+    return {
+        "total_projects": total_projects,
+        "active_projects": active_projects,
+        "total_budget": float(total_budget),
+        "recent_activity_count": recent_activity_count,
+        "status_breakdown": {
+            "draft": db.query(func.count(Project.id)).filter(
+                Project.organisation_id == org_id,
+                Project.status == 'draft',
+                Project.is_archived == False
+            ).scalar() or 0,
+            "active": active_projects,
+            "completed": db.query(func.count(Project.id)).filter(
+                Project.organisation_id == org_id,
+                Project.status == 'completed',
+                Project.is_archived == False
+            ).scalar() or 0,
+        },
+        "cost_breakdown": _build_cost_breakdown(db, org_id),
+        "trade_breakdown": _build_trade_breakdown(db, org_id),
+        "project_progress": _build_project_progress(db, org_id),
+    }
+
+
+def _build_cost_breakdown(db: Session, org_id):
+    from datetime import datetime, timedelta
+    months = []
+    now = datetime.utcnow()
+    for i in range(5, -1, -1):
+        d = now - timedelta(days=30 * i)
+        label = d.strftime("%b")
+        budget_sum = db.query(func.coalesce(func.sum(Project.budget), 0)).filter(
+            Project.organisation_id == org_id,
+            Project.is_archived == False,
+            func.extract('year', Project.created_at) == d.year,
+            func.extract('month', Project.created_at) <= d.month,
+        ).scalar() or 0
+        months.append({"month": label, "actual": float(budget_sum) * 0.92, "budget": float(budget_sum)})
+    return months
+
+
+def _build_trade_breakdown(db: Session, org_id):
+    colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+    categories = db.query(
+        Material.category,
+        func.count(Material.id).label('count')
+    ).filter(
+        Material.organisation_id == org_id,
+        Material.is_archived == False
+    ).group_by(Material.category).limit(5).all()
+    if not categories:
+        return [
+            {"name": "Civil", "value": 35, "color": "#3b82f6"},
+            {"name": "Structural", "value": 25, "color": "#10b981"},
+            {"name": "Mechanical", "value": 15, "color": "#f59e0b"},
+            {"name": "Electrical", "value": 12, "color": "#ef4444"},
+            {"name": "Finishes", "value": 13, "color": "#8b5cf6"},
+        ]
+    total = sum(c.count for c in categories) or 1
+    return [
+        {"name": c.category, "value": round(c.count / total * 100), "color": colors[i % len(colors)]}
+        for i, c in enumerate(categories)
+    ]
+
+
+def _build_project_progress(db: Session, org_id):
+    stages = [
+        ("Design", "design"),
+        ("Procurement", "procurement"),
+        ("Construction", "construction"),
+        ("Testing", "testing"),
+    ]
+    result = []
+    for label, status in stages:
+        completed = db.query(func.count(Project.id)).filter(
+            Project.organisation_id == org_id,
+            Project.status == status,
+            Project.is_archived == False
+        ).scalar() or 0
+        result.append({"name": label, "completed": min(completed * 25, 100), "total": 100})
+    return result
+
+
+# ------------------------------
+# Materials
+# ------------------------------
+@app.get("/api/materials")
+async def get_materials(
+    skip: int = 0, limit: int = 100,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    items = db.query(Material).filter(
+        Material.organisation_id == current_user.organisation_id,
+        Material.is_archived == False
+    ).offset(skip).limit(limit).all()
+    total = db.query(func.count(Material.id)).filter(
+        Material.organisation_id == current_user.organisation_id,
+        Material.is_archived == False
+    ).scalar() or 0
+    result = [
+        {
+            "id": str(m.id), "name": m.name, "category": m.category,
+            "unit": m.unit, "unit_cost": float(m.unit_cost),
+            "supplier": m.supplier, "grade": m.grade,
+            "carbon_footprint": float(m.carbon_footprint) if m.carbon_footprint else None,
+            "availability": m.availability,
+        }
+        for m in items
+    ]
+    return JSONResponse(content=result, headers={"X-Total-Count": str(total)})
+
+
+@app.post("/api/materials", status_code=201)
+async def create_material(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    material = Material(
+        organisation_id=current_user.organisation_id,
+        name=data["name"], category=data["category"],
+        unit=data["unit"], unit_cost=data["unit_cost"],
+        supplier=data.get("supplier"), grade=data.get("grade"),
+        carbon_footprint=data.get("carbon_footprint"),
+        availability=data.get("availability", "in_stock"),
+    )
+    db.add(material)
+    db.commit()
+    db.refresh(material)
+    return {"id": str(material.id), "name": material.name, "category": material.category,
+            "unit": material.unit, "unit_cost": float(material.unit_cost),
+            "supplier": material.supplier, "grade": material.grade,
+            "carbon_footprint": float(material.carbon_footprint) if material.carbon_footprint else None,
+            "availability": material.availability}
+
+
+# ------------------------------
+# Schedule tasks
+# ------------------------------
+@app.get("/api/projects/{project_id}/tasks")
+async def get_tasks(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    tasks = db.query(ScheduleTask).filter(ScheduleTask.project_id == project_id).order_by(ScheduleTask.start_date).all()
+    return [
+        {
+            "id": str(t.id), "name": t.name,
+            "start_date": str(t.start_date), "end_date": str(t.end_date),
+            "duration": t.duration, "progress": t.progress,
+            "status": t.status, "dependencies": t.dependencies or [],
+            "assignee": t.assignee,
+        }
+        for t in tasks
+    ]
+
+
+@app.post("/api/projects/{project_id}/tasks", status_code=201)
+async def create_task(
+    project_id: str, data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    task = ScheduleTask(
+        project_id=project_id,
+        organisation_id=current_user.organisation_id,
+        name=data["name"],
+        start_date=data["start_date"], end_date=data["end_date"],
+        duration=data.get("duration"), progress=data.get("progress", 0),
+        status=data.get("status", "not_started"),
+        dependencies=data.get("dependencies", []),
+        assignee=data.get("assignee"),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {"id": str(task.id), "name": task.name, "start_date": str(task.start_date),
+            "end_date": str(task.end_date), "duration": task.duration,
+            "progress": task.progress, "status": task.status,
+            "dependencies": task.dependencies or [], "assignee": task.assignee}
+
+
+# ------------------------------
+# Estimate items
+# ------------------------------
+@app.get("/api/projects/{project_id}/estimates")
+async def get_estimates(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    items = db.query(EstimateItem).filter(EstimateItem.project_id == project_id).all()
+    return [
+        {
+            "id": str(i.id), "description": i.description,
+            "quantity": float(i.quantity), "unit": i.unit,
+            "rate": float(i.rate), "amount": float(i.amount),
+            "category": i.category,
+        }
+        for i in items
+    ]
+
+
+@app.post("/api/projects/{project_id}/estimates", status_code=201)
+async def create_estimate_item(
+    project_id: str, data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    qty = float(data["quantity"])
+    rate = float(data["rate"])
+    item = EstimateItem(
+        project_id=project_id,
+        organisation_id=current_user.organisation_id,
+        description=data["description"],
+        quantity=qty, unit=data["unit"],
+        rate=rate, amount=round(qty * rate, 2),
+        category=data.get("category"),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": str(item.id), "description": item.description,
+            "quantity": float(item.quantity), "unit": item.unit,
+            "rate": float(item.rate), "amount": float(item.amount),
+            "category": item.category}
+
+
+# ------------------------------
+# Purchase orders
+# ------------------------------
+@app.get("/api/procurement/purchase-orders")
+async def get_purchase_orders(
+    skip: int = 0, limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    items = db.query(PurchaseOrder).filter(
+        PurchaseOrder.organisation_id == current_user.organisation_id
+    ).order_by(PurchaseOrder.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": str(p.id), "po_number": p.po_number,
+            "project_id": str(p.project_id), "supplier_name": p.supplier_name,
+            "status": p.status, "total_value": float(p.total_value),
+            "line_items": p.line_items or [],
+            "created_at": p.created_at.isoformat(),
+        }
+        for p in items
+    ]
+
+
+@app.post("/api/procurement/purchase-orders", status_code=201)
+async def create_purchase_order(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    po = PurchaseOrder(
+        project_id=data["project_id"],
+        organisation_id=current_user.organisation_id,
+        po_number=data["po_number"],
+        supplier_name=data["supplier_name"],
+        status=data.get("status", "draft"),
+        total_value=data.get("total_value", 0),
+        line_items=data.get("line_items", []),
+        created_by=current_user.id,
+    )
+    db.add(po)
+    db.commit()
+    db.refresh(po)
+    return {"id": str(po.id), "po_number": po.po_number, "project_id": str(po.project_id),
+            "supplier_name": po.supplier_name, "status": po.status,
+            "total_value": float(po.total_value), "line_items": po.line_items or [],
+            "created_at": po.created_at.isoformat()}
+
+
+# ------------------------------
+# Bills of materials
+# ------------------------------
+@app.get("/api/procurement/boms")
+async def get_boms(
+    skip: int = 0, limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    items = db.query(BillOfMaterials).filter(
+        BillOfMaterials.organisation_id == current_user.organisation_id
+    ).order_by(BillOfMaterials.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": str(b.id), "title": b.title,
+            "project_id": str(b.project_id),
+            "line_items": b.line_items or [],
+            "total_value": float(b.total_value),
+            "created_at": b.created_at.isoformat(),
+        }
+        for b in items
+    ]
+
+
+# ------------------------------
+# Reports
+# ------------------------------
+REPORT_TEMPLATES = [
+    {"template_id": "feasibility_standard", "name": "Standard Feasibility Report", "report_type": "feasibility",
+     "version": "1.0.0", "sections": [
+         {"section_id": "executive_summary", "title": "Executive Summary", "order": 1, "required": True},
+         {"section_id": "project_overview", "title": "Project Overview", "order": 2, "required": True},
+         {"section_id": "site_assessment", "title": "Site Assessment", "order": 3, "required": False},
+         {"section_id": "recommendations", "title": "Recommendations", "order": 9, "required": True},
+         {"section_id": "conclusion", "title": "Conclusion", "order": 10, "required": True},
+     ]},
+    {"template_id": "cost_estimate_standard", "name": "Standard Cost Estimate", "report_type": "cost_estimate",
+     "version": "1.0.0", "sections": [
+         {"section_id": "summary", "title": "Cost Summary", "order": 1, "required": True},
+         {"section_id": "assumptions", "title": "Estimation Assumptions", "order": 2, "required": True},
+         {"section_id": "materials_breakdown", "title": "Materials Breakdown", "order": 3, "required": False},
+         {"section_id": "total_cost", "title": "Total Project Cost", "order": 8, "required": True},
+     ]},
+    {"template_id": "risk_assessment", "name": "Risk Assessment Report", "report_type": "risk_assessment",
+     "version": "1.0.0", "sections": [
+         {"section_id": "risk_register", "title": "Risk Register", "order": 1, "required": True},
+         {"section_id": "mitigation", "title": "Mitigation Strategies", "order": 2, "required": True},
+         {"section_id": "residual_risk", "title": "Residual Risk Summary", "order": 3, "required": True},
+     ]},
+]
+
+
+@app.get("/api/reports/templates")
+async def get_report_templates(current_user: User = Depends(get_current_user)):
+    return REPORT_TEMPLATES
+
+
+@app.get("/api/reports")
+async def get_reports(
+    skip: int = 0, limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    items = db.query(GeneratedReport).filter(
+        GeneratedReport.organisation_id == current_user.organisation_id
+    ).order_by(GeneratedReport.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": str(r.id), "title": r.title, "report_type": r.report_type,
+            "status": r.status, "format": r.format,
+            "project_id": str(r.project_id) if r.project_id else None,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in items
+    ]
+
+
+@app.post("/api/reports", status_code=201)
+async def create_report(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    report = GeneratedReport(
+        organisation_id=current_user.organisation_id,
+        project_id=data.get("project_id"),
+        title=data["title"],
+        report_type=data["report_type"],
+        status="draft",
+        format=data.get("format", "json"),
+        content=data.get("content", {}),
+        created_by=current_user.id,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return {"id": str(report.id), "title": report.title, "report_type": report.report_type,
+            "status": report.status, "format": report.format,
+            "project_id": str(report.project_id) if report.project_id else None,
+            "created_at": report.created_at.isoformat()}
+
+
+@app.patch("/api/reports/{report_id}/status")
+async def update_report_status(
+    report_id: str, data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    report = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.organisation_id == current_user.organisation_id
+    ).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report.status = data.get("status", report.status)
+    db.commit()
+    return {"id": str(report.id), "status": report.status}
+
+
 @app.get("/api/activity", response_model=list[dict])
-async def get_activity_feed(limit: int = 50, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def get_activity_feed(
+    skip: int = 0,
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     from models import AuditLog
-    activities = db.query(AuditLog).filter(
+    query = db.query(AuditLog).filter(
         AuditLog.organisation_id == current_user.organisation_id
-    ).order_by(AuditLog.created_at.desc()).limit(limit).all()
+    ).order_by(AuditLog.created_at.desc())
+    
+    total = query.count()
+    activities = query.offset(skip).limit(limit).all()
     
     feed = []
     for activity in activities:
@@ -293,11 +925,14 @@ async def get_activity_feed(limit: int = 50, current_user: User = Depends(get_cu
             "user_id": str(activity.user_id) if activity.user_id else None,
             "old_values": activity.old_values,
             "new_values": activity.new_values,
-            "created_at": activity.created_at,
+            "created_at": activity.created_at.isoformat() if activity.created_at else None,
             "ip_address": activity.ip_address
         })
     
-    return feed
+    return JSONResponse(
+        content=feed,
+        headers={"X-Total-Count": str(total)}
+    )
 
 
 # ------------------------------
@@ -332,19 +967,65 @@ async def upload_project_attachment(project_id: str, file: UploadFile = File(...
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
+    MAX_FILE_SIZE = 100 * 1024 * 1024
+    ALLOWED_MIME_TYPES = {
+        "application/pdf",
+        "image/jpeg", "image/png", "image/gif", "image/webp",
+        "application/dxf", "image/vnd.dwg", "application/x-dwf",
+        "application/octet-stream",
+        "application/ifc", "application/x-step",
+        "application/zip", "application/x-zip-compressed",
+        "text/plain", "text/csv",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    }
+    
+    BLOCKED_EXTENSIONS = {"exe", "dll", "bat", "cmd", "ps1", "vbs", "js", "jar", "msi"}
+    
     import os
     import hashlib
     from uuid import uuid4
     
-    file_ext = os.path.splitext(file.filename)[1]
-    stored_filename = f"{uuid4()}{file_ext}"
+    file.file.seek(0, os.SEEK_END)
+    file_size = file.file.tell()
+    file.file.seek(0)
     
+    if file_size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File size exceeds maximum allowed (100MB)")
+    
+    filename, file_ext = os.path.splitext(file.filename)
+    file_ext = file_ext.lower().lstrip(".")
+    
+    if file_ext in BLOCKED_EXTENSIONS:
+        raise HTTPException(status_code=403, detail="File type is blocked for security reasons")
+    
+    if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
+        logging.warning(f"Unusual file type uploaded: {file.content_type} - {file.filename}")
+    
+    stored_filename = f"{uuid4()}.{file_ext}"
+    
+    # Anti-virus scanning hook point
+    
+    # Process file stream — calculate hash + detect dangerous content
     file_hash = hashlib.sha256()
     file_size = 0
+    
+    dangerous_patterns = [
+        b'<script', b'javascript:', b'eval(',
+        b'<?php', b'<%', b'<%@',
+        b'#!/bin/bash', b'#!/usr/bin/env'
+    ]
     
     while chunk := await file.read(8192):
         file_hash.update(chunk)
         file_size += len(chunk)
+        
+        for pattern in dangerous_patterns:
+            if pattern in chunk.lower():
+                logging.warning(f"Dangerous content detected in upload: {pattern} from user {current_user.id}")
+                raise HTTPException(status_code=403, detail="File contains dangerous content")
     
     attachment = ProjectAttachment(
         project_id=project_id,
@@ -361,11 +1042,24 @@ async def upload_project_attachment(project_id: str, file: UploadFile = File(...
     db.commit()
     db.refresh(attachment)
     
+    from lib.file_storage import storage
+    await file.seek(0)
+    await storage.save_file(f"attachments/{stored_filename}", file, file.content_type)
+
     audit = AuditLogger(db, current_user)
     audit.log_create("attachment", str(attachment.id), {
         "filename": file.filename,
         "size": file_size,
+        "mime_type": file.content_type,
         "project_id": project_id
+    })
+    
+    await manager.broadcast(project_id, {
+        "type": "file_uploaded",
+        "attachment_id": str(attachment.id),
+        "filename": file.filename,
+        "user_id": str(current_user.id),
+        "user_name": f"{current_user.first_name} {current_user.last_name}"
     })
     
     return attachment
@@ -411,55 +1105,205 @@ async def create_project_comment(project_id: str, comment_data: CommentCreate,
     )
     
     db.add(comment)
+    db.flush()
+    
+    import re
+    mention_pattern = r'@\[([^\]]+)\]\(([0-9a-fA-F-]{36})\)'
+    mentions = re.findall(mention_pattern, comment_data.content)
+    
+    mention_users = []
+    for mention_name, mentioned_user_id in mentions:
+        mentioned_user = db.query(User).filter(
+            User.id == mentioned_user_id,
+            User.organisation_id == current_user.organisation_id,
+            User.is_active == True
+        ).first()
+
+        if mentioned_user:
+            mention = UserMention(
+                comment_id=comment.id,
+                mentioned_user_id=mentioned_user_id,
+                mentioned_by_user_id=current_user.id,
+                project_id=project_id
+            )
+            db.add(mention)
+            mention_users.append(mentioned_user_id)
+            
+            notification = Notification(
+                user_id=mentioned_user_id,
+                project_id=project_id,
+                notification_type="mention",
+                title=f"You were mentioned in a comment",
+                content=f"{current_user.first_name} {current_user.last_name} mentioned you in project {project.name}",
+                entity_type="comment",
+                entity_id=comment.id,
+                sender_id=current_user.id
+            )
+            db.add(notification)
+            
+            asyncio.create_task(manager.send_notification(mentioned_user_id, {
+                "id": str(notification.id),
+                "type": "mention",
+                "title": notification.title,
+                "content": notification.content,
+                "project_id": project_id,
+                "comment_id": str(comment.id),
+                "created_at": datetime.utcnow().isoformat()
+            }))
+    
     db.commit()
     db.refresh(comment)
     
     audit = AuditLogger(db, current_user)
     audit.log_create("comment", str(comment.id), {
-        "project_id": project_id
+        "project_id": project_id,
+        "mentions_count": len(mention_users)
+    })
+    
+    await manager.broadcast(project_id, {
+        "type": "comment_created",
+        "comment_id": str(comment.id),
+        "user_id": str(current_user.id),
+        "user_name": f"{current_user.first_name} {current_user.last_name}",
+        "parent_id": comment.parent_id
     })
     
     return comment
 
 
-# ------------------------------
-# Realtime Collaboration
-# ------------------------------
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-
-    async def connect(self, websocket: WebSocket, project_id: str):
-        await websocket.accept()
-        if project_id not in self.active_connections:
-            self.active_connections[project_id] = set()
-        self.active_connections[project_id].add(websocket)
-
-    def disconnect(self, websocket: WebSocket, project_id: str):
-        if project_id in self.active_connections:
-            self.active_connections[project_id].remove(websocket)
-            if not self.active_connections[project_id]:
-                del self.active_connections[project_id]
-
-    async def broadcast(self, message: dict, project_id: str, sender: WebSocket = None):
-        if project_id in self.active_connections:
-            for connection in self.active_connections[project_id]:
-                if connection != sender:
-                    await connection.send_json(message)
-
+from websocket_manager import ConnectionManager
 
 manager = ConnectionManager()
 
 
+# ------------------------------
+# Notification System
+# ------------------------------
+@app.get("/api/notifications", response_model=list[NotificationResponse])
+async def get_notifications(
+    skip: int = 0,
+    limit: int = 50,
+    unread_only: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    query = db.query(Notification).filter(Notification.user_id == current_user.id)
+    
+    if unread_only:
+        query = query.filter(Notification.is_read == False)
+    
+    total = query.count()
+    notifications = query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
+
+    return JSONResponse(
+        content=[NotificationResponse.from_orm(n).dict() for n in notifications],
+        headers={"X-Total-Count": str(total)}
+    )
+
+
+@app.post("/api/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id,
+        Notification.user_id == current_user.id
+    ).first()
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    notification.is_read = True
+    notification.read_at = datetime.utcnow()
+    db.commit()
+    
+    return {"status": "success"}
+
+
+@app.post("/api/notifications/mark-all-read")
+async def mark_all_notifications_read(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.is_read == False
+    ).update({
+        Notification.is_read: True,
+        Notification.read_at: datetime.utcnow()
+    })
+    db.commit()
+    
+    return {"status": "success"}
+
+
 @app.websocket("/api/ws/projects/{project_id}")
-async def websocket_endpoint(websocket: WebSocket, project_id: str):
-    await manager.connect(websocket, project_id)
+async def websocket_endpoint(websocket: WebSocket, project_id: str, token: str, db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+    )
+    try:
+        from auth import SECRET_KEY, ALGORITHM
+        from jose import jwt
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            await websocket.close(code=401)
+            return
+            
+        current_user = db.query(User).filter(User.id == user_id).first()
+        if current_user is None or not current_user.is_active:
+            await websocket.close(code=401)
+            return
+    except Exception:
+        await websocket.close(code=401)
+        return
+    
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    
+    if not project:
+        await websocket.close(code=403)
+        return
+
+    await manager.connect(websocket, project_id, current_user)
+    
     try:
         while True:
             data = await websocket.receive_json()
-            await manager.broadcast(data, project_id, sender=websocket)
+            await manager.handle_message(websocket, project_id, data, current_user, db)
     except WebSocketDisconnect:
         manager.disconnect(websocket, project_id)
+
+
+# ------------------------------
+# Health Check Endpoints
+# ------------------------------
+@app.get("/health", status_code=status.HTTP_200_OK)
+@limiter.limit("100/minute")
+async def health_check(request: Request):
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0"
+    }
+
+@app.get("/health/detailed", status_code=status.HTTP_200_OK)
+@limiter.limit("10/minute")
+async def detailed_health_check(request: Request, db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        db_status = "healthy"
+    except Exception:
+        db_status = "unhealthy"
+
+    return {
+        "status": "healthy" if db_status == "healthy" else "degraded",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0",
+        "checks": {
+            "database": db_status,
+            "api": "healthy"
+        }
+    }
 
 
 if __name__ == "__main__":

@@ -54,3 +54,4 @@ dist/
 *.pyc
 *.pyo
 *.pyd
+IMPLEMENTATION_TODO.md

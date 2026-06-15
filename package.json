@@ -1,18 +1,19 @@
 {
   "name": "tpt-infrastructure-engineer",
   "version": "1.0.0",
-  "description": "",
+  "description": "End-to-end infrastructure engineering platform for project management, cost estimation, scheduling, and CAD/BIM workflows",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["infrastructure", "engineering", "fastapi", "react", "typescript", "postgis"],
+  "author": "Phillip T",
+  "license": "MIT",
   "type": "commonjs",
   "dependencies": {
     "@headlessui/react": "^2.2.10",
     "@heroicons/react": "^2.2.0",
+    "@hookform/resolvers": "^5.2.2",
     "@tanstack/react-query": "^5.99.2",
     "@tanstack/react-table": "^8.21.3",
     "@types/fabric": "^5.3.11",
@@ -21,12 +22,21 @@
     "@types/three": "^0.184.0",
     "autoprefixer": "^10.5.0",
     "axios": "^1.15.1",
+    "clsx": "^2.1.1",
     "dxf-parser": "^1.1.2",
     "fabric": "^7.3.1",
+    "i18next": "^26.0.6",
+    "lucide-react": "^1.8.0",
     "postcss": "^8.5.10",
+    "react-hook-form": "^7.73.1",
+    "react-i18next": "^17.0.4",
+    "react-router-dom": "^7.14.1",
     "recharts": "^3.8.1",
+    "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.2",
     "three": "^0.149.0",
-    "web-ifc-three": "^0.0.125"
+    "web-ifc-three": "^0.0.125",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
   }
 }

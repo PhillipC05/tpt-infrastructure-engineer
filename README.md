@@ -1,81 +1,139 @@
-# TPT Infrastructure Engineer Platform
+# TPT Infrastructure Engineer
 
-Complete end-to-end platform for infrastructure engineering planning, design, costing and reporting. Built for civil engineers, project managers, quantity surveyors and contractors.
+An end-to-end infrastructure engineering platform for project management, cost estimation, scheduling, CAD/BIM workflows, and real-time collaboration. Built for civil engineers, project managers, quantity surveyors, and contractors.
 
-## ✅ Features
+[![CI](https://github.com/PhillipT1/tpt-infrastructure-engineer/actions/workflows/ci.yml/badge.svg)](https://github.com/PhillipT1/tpt-infrastructure-engineer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-| Module | Status |
-|---|---|
-| ✅ Project Workspace | Planned |
-| ✅ 2D/3D Drawing Board | Planned |
-| ✅ AI Design Generator | Planned |
-| ✅ Materials Database | Planned |
-| ✅ Trade Breakdown Classification | Planned |
-| ✅ Feasibility Analysis Engine | Planned |
-| ✅ Cost Estimator | Planned |
-| ✅ CPM Timeline Scheduler | Planned |
-| ✅ Risk Analysis | Planned |
-| ✅ Regulatory Report Generator | Planned |
-| ✅ Purchase Order & Procurement | Planned |
-| ✅ Role Based Access Control | Planned |
+## Features
 
-## 🛠️ Technical Stack
+| Module | Description |
+|--------|-------------|
+| Project Workspace | CRUD, version control, activity feed, file attachments, commenting |
+| 2D Drawing Board | Fabric.js canvas with snapping, dimensioning, layers, annotations |
+| 3D Scene Viewer | Three.js scene rendering with IFC/BIM model support |
+| AI Design Generator | Parametric templates and structural validation |
+| Materials Database | Classification, regional pricing, supplier info, carbon tracking |
+| Trade Breakdown | WBS generator with labour and plant databases |
+| Cost Estimator | Quantity take-off, overhead/profit, contingency, escalation |
+| CPM Scheduler | Gantt chart, resource levelling, milestone tracking |
+| Feasibility Engine | Geotechnical, environmental, hydrological, traffic analysis |
+| Risk Analysis | Risk register, Monte Carlo simulation, mitigation planning |
+| Report Generator | PDF/Excel export with approval workflow |
+| Procurement | BOM, tender packages, supplier comparison |
+| CAD/BIM Integration | Bi-directional DXF, DWG, IFC support |
+| AI Assistant | Multi-provider support (OpenAI, Anthropic, Grok, OpenRouter) |
+| Real-time Collaboration | WebSocket presence, live cursors, document locking |
+| Role-based Access | Owner, Engineer, PM, Surveyor, and more |
+| i18n | English and Māori translations |
+
+## Tech Stack
 
 | Layer | Technology |
-|---|---|
-| Frontend | React 19 + TypeScript + Tailwind CSS |
-| Drawing Engine | Fabric.js + Three.js |
-| Backend | FastAPI + Python 3.12 |
-| Database | PostgreSQL + PostGIS |
-| AI Engine | Llama 3 70B + LangChain |
-| Calculations | NumPy + SciPy |
+|-------|-----------|
+| Frontend | React 19, TypeScript, Tailwind CSS, Vite |
+| State | Zustand, TanStack Query |
+| Backend | FastAPI, SQLAlchemy 2, Pydantic v2 |
+| Database | PostgreSQL 16 + PostGIS 3.4 |
+| Migrations | Alembic |
+| Real-time | WebSockets |
+| Containers | Docker + docker-compose |
+| CI/CD | GitHub Actions |
 
-## 🚀 Development Setup
+## Prerequisites
+
+- Python 3.12+
+- Node.js 20+
+- PostgreSQL 16 with PostGIS 3.4
+
+## Quick Start
+
+### 1. Clone and configure
 
 ```bash
-# Install dependencies
-npm install
-
-# Start backend
-cd backend && pip install -r requirements.txt
-uvicorn main:app --reload
-
-# Start frontend
-cd frontend && npm run dev
+git clone https://github.com/PhillipT1/tpt-infrastructure-engineer.git
+cd tpt-infrastructure-engineer
+cp backend/.env.example backend/.env
+# Edit backend/.env with your database credentials and API keys
 ```
 
-## Architecture
+### 2. Database setup
+
+```bash
+# Windows — start PostgreSQL service (adjust service name if needed)
+net start postgresql-x64-16
+
+# Verify it is running
+netstat -ano | findstr :5432
+
+# Create the database
+psql -U postgres -c "CREATE DATABASE tpt_infrastructure;"
+
+# Apply migrations
+cd backend
+alembic upgrade head
+```
+
+### 3. Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+- API: `http://localhost:8000`
+- Swagger docs: `http://localhost:8000/docs`
+
+### 4. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend: `http://localhost:5173`
+
+## Docker
+
+```bash
+docker-compose up --build
+```
+
+## Running Tests
+
+```bash
+# Backend unit + integration tests
+cd backend
+python -m pytest ../tests/ -v
+
+# Load testing
+cd tests/load_testing
+locust -f locustfile.py
+```
+
+## Project Structure
 
 ```
 tpt-infrastructure-engineer/
-├── frontend/          React Web Application
-├── backend/           FastAPI Backend Services
-├── database/          Database Migrations & Schemas
-├── schemas/           Engineering Calculation Schemas
-├── docs/              Documentation
-└── tests/             Test Suite
+├── frontend/          React + TypeScript + Tailwind
+├── backend/           FastAPI + SQLAlchemy
+├── tests/             Test suite
+├── alembic/           Database migrations
+├── docs/              Deployment and runbook docs
+├── docker-compose.yml
+└── Dockerfile
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, code standards, and PR process.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-MIT License
-
-Copyright (c) 2026 TPT Infrastructure Engineer
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+[MIT](LICENSE) © 2026 TPT Solutions

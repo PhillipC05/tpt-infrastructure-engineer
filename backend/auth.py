@@ -9,7 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from models import User
 
-SECRET_KEY = os.environ["TPT_SECRET_KEY"]
+# Security Configuration
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is required. Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\"")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("TPT_TOKEN_EXPIRE_MINUTES", "480"))
 

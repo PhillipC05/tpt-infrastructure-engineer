@@ -33,6 +33,13 @@ class ProjectUpdate(BaseModel):
     is_archived: Optional[bool] = None
 
 
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    current_password: Optional[str] = None
+    new_password: Optional[str] = Field(None, min_length=8)
+
+
 class UserCreate(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8)
@@ -101,6 +108,25 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     is_archived: bool
+
+    class Config:
+        orm_mode = True
+
+
+class NotificationResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    project_id: Optional[UUID]
+    notification_type: str
+    title: str
+    content: Optional[str]
+    entity_type: Optional[str]
+    entity_id: Optional[UUID]
+    sender_id: Optional[UUID]
+    notification_metadata: Optional[dict]
+    is_read: bool
+    read_at: Optional[datetime]
+    created_at: datetime
 
     class Config:
         orm_mode = True

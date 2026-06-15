@@ -59,6 +59,7 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
     email_verified = Column(Boolean, default=False)
+    email_notifications_enabled = Column(Boolean, default=True)
 
     organisation = relationship("Organisation", back_populates="users")
     permissions = relationship("UserPermission", back_populates="user", cascade="all, delete-orphan")
@@ -238,3 +239,157 @@ class ValidationRule(Base):
     condition = Column(JSONB, nullable=False)
     severity = Column(String(20), default='warning')
     is_active = Column(Boolean, default=True)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    
+    notification_type = Column(String(100), nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(String)
+    
+    entity_type = Column(String(100))
+    entity_id = Column(UUID(as_uuid=True))
+    
+    sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    notification_metadata = Column(JSONB)
+    
+    is_read = Column(Boolean, default=False)
+    read_at = Column(DateTime(timezone=True))
+    
+    sent_email = Column(Boolean, default=False)
+    sent_push = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserMention(Base):
+    __tablename__ = "user_mentions"
+
+    id = Column(BigInteger, primary_key=True)
+    comment_id = Column(BigInteger, ForeignKey("project_comments.id", ondelete="CASCADE"), nullable=False)
+    mentioned_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    mentioned_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+
+    notification_sent = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Materials catalogue (org-level)
+# ---------------------------------------------------------------------------
+class Material(Base):
+    __tablename__ = "materials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    category = Column(String(100), nullable=False)
+    unit = Column(String(20), nullable=False)
+    unit_cost = Column(Numeric(15, 4), nullable=False)
+    supplier = Column(String(255))
+    grade = Column(String(100))
+    carbon_footprint = Column(Numeric(10, 4))
+    availability = Column(String(50), default='in_stock')
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    is_archived = Column(Boolean, default=False)
+
+
+# ---------------------------------------------------------------------------
+# Schedule tasks (project-scoped)
+# ---------------------------------------------------------------------------
+class ScheduleTask(Base):
+    __tablename__ = "schedule_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    duration = Column(Integer)
+    progress = Column(Integer, default=0)
+    status = Column(String(50), default='not_started')
+    dependencies = Column(ARRAY(String), default=[])
+    assignee = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Estimate items (project-scoped)
+# ---------------------------------------------------------------------------
+class EstimateItem(Base):
+    __tablename__ = "estimate_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    description = Column(String(500), nullable=False)
+    quantity = Column(Numeric(15, 4), nullable=False)
+    unit = Column(String(20), nullable=False)
+    rate = Column(Numeric(15, 4), nullable=False)
+    amount = Column(Numeric(15, 2), nullable=False)
+    category = Column(String(100))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Purchase orders (project-scoped)
+# ---------------------------------------------------------------------------
+class PurchaseOrder(Base):
+    __tablename__ = "purchase_orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    po_number = Column(String(100), nullable=False)
+    supplier_name = Column(String(255), nullable=False)
+    status = Column(String(50), default='draft')
+    total_value = Column(Numeric(15, 2), default=0)
+    line_items = Column(JSONB, default=list)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Bills of materials (project-scoped)
+# ---------------------------------------------------------------------------
+class BillOfMaterials(Base):
+    __tablename__ = "bills_of_materials"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    line_items = Column(JSONB, default=list)
+    total_value = Column(Numeric(15, 2), default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Generated reports (project-scoped)
+# ---------------------------------------------------------------------------
+class GeneratedReport(Base):
+    __tablename__ = "generated_reports"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    report_type = Column(String(100), nullable=False)
+    status = Column(String(50), default='draft')
+    format = Column(String(20), default='json')
+    content = Column(JSONB, default=dict)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
