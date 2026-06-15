@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Response, Query
 from fastapi.responses import JSONResponse
 from typing import Dict, Set, Optional
 from fastapi.middleware.cors import CORSMiddleware
@@ -104,10 +104,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logging.error(f"Unhandled exception: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "An unexpected error occurred",
-            "type": type(exc).__name__
-        }
+        content={"detail": "An unexpected error occurred"}
     )
 
 @app.exception_handler(HTTPException)
@@ -121,17 +118,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         headers=exc.headers
     )
 
-from database import DATABASE_URL, engine, SessionLocal
+from database import DATABASE_URL, engine, SessionLocal, get_db
 
 # Database tables managed via Alembic migrations.
 # Run: alembic upgrade head
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @app.post("/auth/login", response_model=Token)
@@ -300,8 +290,9 @@ async def get_project_versions(
 
 @app.get("/api/projects", response_model=list[ProjectResponse])
 async def get_projects(
+    response: Response,
     skip: int = 0,
-    limit: int = 50,
+    limit: int = Query(default=50, le=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -309,14 +300,12 @@ async def get_projects(
         Project.organisation_id == current_user.organisation_id,
         Project.is_archived == False
     ).order_by(Project.updated_at.desc())
-    
+
     total = query.count()
     projects = query.offset(skip).limit(limit).all()
-    
-    return JSONResponse(
-        content=[ProjectResponse.from_orm(p).dict() for p in projects],
-        headers={"X-Total-Count": str(total)}
-    )
+
+    response.headers["X-Total-Count"] = str(total)
+    return projects
 
 
 @app.post("/api/projects", response_model=ProjectResponse, status_code=201)
@@ -411,10 +400,11 @@ async def update_project(project_id: str, project_data: ProjectUpdate,
         ProjectVersion.project_id == project.id
     ).order_by(ProjectVersion.version_number.desc()).first()
 
+    next_num = (last_version.version_number + 1) if last_version else 2
     new_version = ProjectVersion(
         project_id=project.id,
-        version_number=last_version.version_number + 1,
-        name=f"Version {last_version.version_number + 1}",
+        version_number=next_num,
+        name=f"Version {next_num}",
         snapshot=old_values,
         created_by=current_user.id
     )
@@ -513,7 +503,7 @@ def _build_cost_breakdown(db: Session, org_id):
             Project.organisation_id == org_id,
             Project.is_archived == False,
             func.extract('year', Project.created_at) == d.year,
-            func.extract('month', Project.created_at) <= d.month,
+            func.extract('month', Project.created_at) == d.month,
         ).scalar() or 0
         months.append({"month": label, "actual": float(budget_sum) * 0.92, "budget": float(budget_sum)})
     return months
@@ -566,7 +556,8 @@ def _build_project_progress(db: Session, org_id):
 # ------------------------------
 @app.get("/api/materials")
 async def get_materials(
-    skip: int = 0, limit: int = 100,
+    response: Response,
+    skip: int = 0, limit: int = Query(default=50, le=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -588,7 +579,8 @@ async def get_materials(
         }
         for m in items
     ]
-    return JSONResponse(content=result, headers={"X-Total-Count": str(total)})
+    response.headers["X-Total-Count"] = str(total)
+    return result
 
 
 @app.post("/api/materials", status_code=201)
@@ -762,6 +754,13 @@ async def create_purchase_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    project = db.query(Project).filter(
+        Project.id == data["project_id"],
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
     po = PurchaseOrder(
         project_id=data["project_id"],
         organisation_id=current_user.organisation_id,
@@ -900,10 +899,11 @@ async def update_report_status(
     return {"id": str(report.id), "status": report.status}
 
 
-@app.get("/api/activity", response_model=list[dict])
+@app.get("/api/activity")
 async def get_activity_feed(
+    response: Response,
     skip: int = 0,
-    limit: int = 50,
+    limit: int = Query(default=50, le=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -911,13 +911,12 @@ async def get_activity_feed(
     query = db.query(AuditLog).filter(
         AuditLog.organisation_id == current_user.organisation_id
     ).order_by(AuditLog.created_at.desc())
-    
+
     total = query.count()
     activities = query.offset(skip).limit(limit).all()
-    
-    feed = []
-    for activity in activities:
-        feed.append({
+
+    feed = [
+        {
             "id": str(activity.id),
             "action": activity.action,
             "entity_type": activity.entity_type,
@@ -926,13 +925,13 @@ async def get_activity_feed(
             "old_values": activity.old_values,
             "new_values": activity.new_values,
             "created_at": activity.created_at.isoformat() if activity.created_at else None,
-            "ip_address": activity.ip_address
-        })
-    
-    return JSONResponse(
-        content=feed,
-        headers={"X-Total-Count": str(total)}
-    )
+            "ip_address": activity.ip_address,
+        }
+        for activity in activities
+    ]
+
+    response.headers["X-Total-Count"] = str(total)
+    return feed
 
 
 # ------------------------------
@@ -1042,9 +1041,12 @@ async def upload_project_attachment(project_id: str, file: UploadFile = File(...
     db.commit()
     db.refresh(attachment)
     
-    from lib.file_storage import storage
-    await file.seek(0)
-    await storage.save_file(f"attachments/{stored_filename}", file, file.content_type)
+    upload_dir = os.path.join(os.path.dirname(__file__), "uploads", "attachments")
+    os.makedirs(upload_dir, exist_ok=True)
+    file.file.seek(0)
+    with open(os.path.join(upload_dir, stored_filename), "wb") as out:
+        while chunk := file.file.read(8192):
+            out.write(chunk)
 
     audit = AuditLogger(db, current_user)
     audit.log_create("attachment", str(attachment.id), {
@@ -1181,24 +1183,23 @@ manager = ConnectionManager()
 # ------------------------------
 @app.get("/api/notifications", response_model=list[NotificationResponse])
 async def get_notifications(
+    response: Response,
     skip: int = 0,
-    limit: int = 50,
+    limit: int = Query(default=50, le=200),
     unread_only: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     query = db.query(Notification).filter(Notification.user_id == current_user.id)
-    
+
     if unread_only:
         query = query.filter(Notification.is_read == False)
-    
+
     total = query.count()
     notifications = query.order_by(Notification.created_at.desc()).offset(skip).limit(limit).all()
 
-    return JSONResponse(
-        content=[NotificationResponse.from_orm(n).dict() for n in notifications],
-        headers={"X-Total-Count": str(total)}
-    )
+    response.headers["X-Total-Count"] = str(total)
+    return notifications
 
 
 @app.post("/api/notifications/{notification_id}/read")

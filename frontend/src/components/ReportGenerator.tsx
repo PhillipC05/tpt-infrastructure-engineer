@@ -28,6 +28,16 @@ interface GeneratedReport {
 const FORMATS = ['json', 'csv', 'html'] as const;
 type Format = typeof FORMATS[number];
 
+function downloadBlob(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-700',
   submitted: 'bg-blue-100 text-blue-700',
@@ -292,7 +302,34 @@ export default function ReportGenerator() {
                 {FORMATS.map(f => (
                   <button
                     key={f}
-                    onClick={() => alert(`Export as ${f.toUpperCase()} — connect to a backend export endpoint to download`)}
+                    onClick={() => {
+                      const slug = generatedReport?.title.replace(/\s+/g, '_') ?? 'report';
+                      if (f === 'json') {
+                        downloadBlob(
+                          JSON.stringify(generatedReport, null, 2),
+                          `${slug}.json`,
+                          'application/json'
+                        );
+                      } else if (f === 'csv') {
+                        const rows = [
+                          ['Field', 'Value'],
+                          ['ID', generatedReport?.id ?? ''],
+                          ['Title', generatedReport?.title ?? ''],
+                          ['Type', generatedReport?.report_type ?? ''],
+                          ['Status', generatedReport?.status ?? ''],
+                          ['Format', generatedReport?.format ?? ''],
+                          ['Created', generatedReport?.created_at ?? ''],
+                        ];
+                        downloadBlob(
+                          rows.map(r => r.join(',')).join('\n'),
+                          `${slug}.csv`,
+                          'text/csv'
+                        );
+                      } else if (f === 'html') {
+                        const html = `<!DOCTYPE html><html><head><title>${generatedReport?.title}</title></head><body><h1>${generatedReport?.title}</h1><p>Type: ${generatedReport?.report_type}</p><p>Status: ${generatedReport?.status}</p><p>Generated: ${generatedReport?.created_at}</p></body></html>`;
+                        downloadBlob(html, `${slug}.html`, 'text/html');
+                      }
+                    }}
                     className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
                   >
                     <svg className="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -301,6 +338,15 @@ export default function ReportGenerator() {
                     Export {f.toUpperCase()}
                   </button>
                 ))}
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-2 px-4 py-2 border border-blue-300 text-blue-700 rounded-md text-sm hover:bg-blue-50"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                  </svg>
+                  Print / PDF
+                </button>
               </div>
             </div>
           )}
