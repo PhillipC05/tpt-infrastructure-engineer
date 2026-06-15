@@ -1,5 +1,4 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import { useAuthStore } from '../../store/authStore';
 
@@ -59,19 +58,18 @@ const icons = {
 
 export default function NavigationSidebar() {
   const location = useLocation();
-  const { t } = useTranslation();
   const { user } = useAuthStore();
 
   const navigation = [
-    { name: t('navigation.dashboard'), to: '/dashboard', icon: 'home' },
-    { name: t('navigation.projects'), to: '/projects', icon: 'folder' },
-    { name: t('navigation.drawings'), to: '/drawings', icon: 'pencil' },
-    { name: t('navigation.estimates'), to: '/estimator', icon: 'calculator' },
-    { name: t('navigation.schedule'), to: '/schedule', icon: 'calendar' },
-    { name: t('navigation.materials'), to: '/materials', icon: 'cube' },
-    { name: t('navigation.reports'), to: '/reports', icon: 'document' },
-    { name: t('navigation.procurement'), to: '/procurement', icon: 'shopping' },
-    { name: t('navigation.settings'), to: '/settings', icon: 'cog' },
+    { name: 'Dashboard',      to: '/dashboard',  icon: 'home' },
+    { name: 'Projects',       to: '/projects',   icon: 'folder' },
+    { name: 'Drawings',       to: '/drawings',   icon: 'pencil' },
+    { name: 'Cost Estimator', to: '/estimator',  icon: 'calculator' },
+    { name: 'Schedule',       to: '/schedule',   icon: 'calendar' },
+    { name: 'Materials',      to: '/materials',  icon: 'cube' },
+    { name: 'Reports',        to: '/reports',    icon: 'document' },
+    { name: 'Procurement',    to: '/procurement',icon: 'shopping' },
+    { name: 'Settings',       to: '/settings',   icon: 'cog' },
   ];
 
   const initials = user

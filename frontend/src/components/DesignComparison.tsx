@@ -12,7 +12,7 @@ interface DesignComparisonProps {
 }
 
 const DesignComparison: React.FC<DesignComparisonProps> = ({ designs }) => {
-  const [selectedDesigns, setSelectedDesigns] = useState<string[]>([]);
+  const [selectedDesigns] = useState<string[]>([]);
 
   const metrics: ComparisonMetric[] = [
     { id: 'score', name: 'Overall Score', unit: '%', weights: { score: 1 } },
@@ -21,13 +21,6 @@ const DesignComparison: React.FC<DesignComparisonProps> = ({ designs }) => {
     { id: 'constructionTime', name: 'Est. Duration', unit: 'days', weights: { constructionTime: 1 } },
   ];
 
-  const toggleSelection = (designId: string) => {
-    setSelectedDesigns(prev => 
-      prev.includes(designId) 
-        ? prev.filter(d => d !== designId)
-        : [...prev, designId]
-    );
-  };
 
   const selectedDesignData = designs.filter(d => selectedDesigns.includes(d.id));
 

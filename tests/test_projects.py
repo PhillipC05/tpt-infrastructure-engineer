@@ -19,7 +19,8 @@ def auth_token(client: TestClient) -> str:
         "email": "project-tester@tpt.local",
         "password": "SecurePass123!",
         "first_name": "Project",
-        "last_name": "Tester"
+        "last_name": "Tester",
+        "organisation_name": "Test Infrastructure Ltd"
     })
     resp = client.post("/auth/login", data={
         "username": "project-tester@tpt.local",

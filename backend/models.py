@@ -3,13 +3,11 @@ from enum import Enum as PyEnum
 from uuid import uuid4
 from sqlalchemy import (
     Column, String, Boolean, DateTime, ForeignKey, Integer,
-    BigInteger, Date, Numeric, ARRAY, JSON, func
+    BigInteger, Date, Numeric, Float, ARRAY, JSON, func
 )
 from sqlalchemy.dialects.postgresql import UUID, INET, JSONB, ENUM
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from geoalchemy2 import Geography
-
 Base = declarative_base()
 
 
@@ -24,7 +22,7 @@ class UserRole(PyEnum):
     VIEWER = "viewer"
 
 
-user_role_enum = ENUM(UserRole, name="user_role", create_type=False)
+user_role_enum = ENUM(UserRole, name="user_role", create_type=True)
 
 
 class Organisation(Base):
@@ -105,7 +103,8 @@ class Project(Base):
     description = Column(String)
     project_number = Column(String(100))
     status = Column(String(50), default='draft')
-    location = Column(Geography(geometry_type='POINT', srid=4326))
+    latitude = Column(Float)
+    longitude = Column(Float)
     country_code = Column(String(2))
     client_name = Column(String(255))
     start_date = Column(Date)

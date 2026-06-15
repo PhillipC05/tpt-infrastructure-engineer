@@ -11,7 +11,7 @@ interface FactorScore {
 }
 
 export default function FeasibilityPage() {
-  const [factors, setFactors] = useState<FactorScore[]>([
+  const [factors] = useState<FactorScore[]>([
     { name: 'Geotechnical Suitability', score: 78, max: 100, status: 'pass', notes: 'Suitable founding conditions identified' },
     { name: 'Environmental Impact', score: 56, max: 100, status: 'warning', notes: 'Minor vegetation clearance required' },
     { name: 'Hydrological Risk', score: 92, max: 100, status: 'pass', notes: 'Outside 100 year flood plain' },

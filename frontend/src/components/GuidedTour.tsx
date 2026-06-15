@@ -124,7 +124,6 @@ export const GuidedTour: React.FC<{ tourId: string; onComplete: () => void }> = 
 
 export const TourTrigger: React.FC<{ tourId: string; children: React.ReactNode }> = ({ tourId, children }) => {
   const [showTour, setShowTour] = useState(false);
-  const tourCompleted = localStorage.getItem(`tour_${tourId}_completed`) === 'true';
 
   const startTour = () => {
     setShowTour(true);

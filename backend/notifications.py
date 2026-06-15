@@ -1,4 +1,3 @@
-// backend/notifications.py
 import os
 import aiosmtplib
 from email.mime.multipart import MIMEMultipart

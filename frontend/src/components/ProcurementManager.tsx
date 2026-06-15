@@ -47,8 +47,8 @@ export default function ProcurementManager() {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      api.getBOMs().catch(() => []),
-      api.getPurchaseOrders().catch(() => []),
+      api.getBoms().then(r => r.data).catch(() => []),
+      api.getPurchaseOrders().then(r => r.data).catch(() => []),
     ]).then(([b, po]) => {
       setBoms(b);
       setPurchaseOrders(po);

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Request, Response, Query
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 from typing import Dict, Set, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -22,7 +23,8 @@ import asyncio
 from models import (
     Base, User, Project, Organisation, ProjectVersion, UserPermission, UserRole,
     ProjectAttachment, ProjectComment, Notification, UserMention,
-    Material, ScheduleTask, EstimateItem, PurchaseOrder, BillOfMaterials, GeneratedReport
+    Material, ScheduleTask, EstimateItem, PurchaseOrder, BillOfMaterials, GeneratedReport,
+    Design, DesignAlternative,
 )
 from notifications import NotificationService
 from auth import (
@@ -31,16 +33,34 @@ from auth import (
 )
 from audit_logger import AuditLogger
 from fastapi import UploadFile, File
-from schemas import ProjectCreate, ProjectUpdate, ProjectResponse, UserCreate, UserUpdate, UserResponse, AttachmentResponse, CommentCreate, CommentResponse, NotificationResponse
-from geoalchemy2.elements import WKTElement
+from schemas import (
+    ProjectCreate, ProjectUpdate, ProjectResponse,
+    UserCreate, UserUpdate, UserResponse,
+    AttachmentResponse, CommentCreate, CommentResponse, NotificationResponse,
+    MaterialCreate, MaterialUpdate,
+    TaskCreate, TaskUpdate,
+    EstimateItemCreate, EstimateItemUpdate,
+    PurchaseOrderCreate, PurchaseOrderUpdate,
+    DesignCreate, DesignUpdate, DesignAlternativeCreate,
+)
 
 # Load environment variables
 load_dotenv()
 
-# Initialize Limiter
+# Initialize Limiter (relaxed limits in test environment)
+_TESTING = os.getenv("TESTING") == "true"
+_RATE_LIMIT_LOGIN = "1000/minute" if _TESTING else "10/minute"
+_RATE_LIMIT_REGISTER = "1000/minute" if _TESTING else "5/minute"
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="TPT Infrastructure Engineer API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from database import engine
+    from models import Base
+    Base.metadata.create_all(bind=engine)
+    yield
+
+app = FastAPI(title="TPT Infrastructure Engineer API", version="1.0.0", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -94,7 +114,7 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     expose_headers=["X-Total-Count", "X-Request-ID"]
 )
 
@@ -124,8 +144,13 @@ from database import DATABASE_URL, engine, SessionLocal, get_db
 # Run: alembic upgrade head
 
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "version": "1.0.0"}
+
+
 @app.post("/auth/login", response_model=Token)
-@limiter.limit("10/minute")
+@limiter.limit(_RATE_LIMIT_LOGIN)
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -144,13 +169,13 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         "access_token": access_token,
         "token_type": "bearer",
         "user_id": str(user.id),
-        "role": user.role.value,
+        "role": user.role.value if hasattr(user.role, 'value') else str(user.role),
         "name": f"{user.first_name} {user.last_name}"
     }
 
 
 @app.post("/auth/register", response_model=UserResponse, status_code=201)
-@limiter.limit("5/minute")
+@limiter.limit(_RATE_LIMIT_REGISTER)
 async def register(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -159,9 +184,12 @@ async def register(request: Request, user_data: UserCreate, db: Session = Depend
             detail="User with this email already exists"
         )
 
-    if user_data.organisation_id:
+    org_id = user_data.organisation_id
+    assigned_role = UserRole.VIEWER
+
+    if org_id:
         organisation = db.query(Organisation).filter(
-            Organisation.id == user_data.organisation_id,
+            Organisation.id == org_id,
             Organisation.is_active == True
         ).first()
         if not organisation:
@@ -169,14 +197,20 @@ async def register(request: Request, user_data: UserCreate, db: Session = Depend
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Organisation not found or inactive"
             )
+    elif user_data.organisation_name:
+        new_org = Organisation(name=user_data.organisation_name)
+        db.add(new_org)
+        db.flush()
+        org_id = new_org.id
+        assigned_role = UserRole.OWNER
 
     user = User(
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         first_name=user_data.first_name,
         last_name=user_data.last_name,
-        organisation_id=user_data.organisation_id,
-        role=UserRole.VIEWER
+        organisation_id=org_id,
+        role=assigned_role
     )
 
     db.add(user)
@@ -209,7 +243,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
         "email": current_user.email,
         "first_name": current_user.first_name,
         "last_name": current_user.last_name,
-        "role": current_user.role.value,
+        "role": current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role),
         "organisation_id": str(current_user.organisation_id) if current_user.organisation_id else None
     }
 
@@ -325,8 +359,10 @@ async def create_project(project_data: ProjectCreate, current_user: User = Depen
         budget=project_data.budget
     )
 
-    if project_data.latitude and project_data.longitude:
-        project.location = WKTElement(f'POINT({project_data.longitude} {project_data.latitude})', srid=4326)
+    if project_data.latitude is not None:
+        project.latitude = project_data.latitude
+    if project_data.longitude is not None:
+        project.longitude = project_data.longitude
 
     db.add(project)
     db.flush()
@@ -393,8 +429,10 @@ async def update_project(project_id: str, project_data: ProjectUpdate,
             continue
         setattr(project, field, value)
 
-    if project_data.latitude and project_data.longitude:
-        project.location = WKTElement(f'POINT({project_data.longitude} {project_data.latitude})', srid=4326)
+    if project_data.latitude is not None:
+        project.latitude = project_data.latitude
+    if project_data.longitude is not None:
+        project.longitude = project_data.longitude
 
     last_version = db.query(ProjectVersion).filter(
         ProjectVersion.project_id == project.id
@@ -585,26 +623,117 @@ async def get_materials(
 
 @app.post("/api/materials", status_code=201)
 async def create_material(
-    data: dict,
+    data: MaterialCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     material = Material(
         organisation_id=current_user.organisation_id,
-        name=data["name"], category=data["category"],
-        unit=data["unit"], unit_cost=data["unit_cost"],
-        supplier=data.get("supplier"), grade=data.get("grade"),
-        carbon_footprint=data.get("carbon_footprint"),
-        availability=data.get("availability", "in_stock"),
+        name=data.name, category=data.category,
+        unit=data.unit, unit_cost=data.unit_cost,
+        supplier=data.supplier, grade=data.grade,
+        carbon_footprint=data.carbon_footprint,
+        availability=data.availability or "in_stock",
     )
     db.add(material)
     db.commit()
     db.refresh(material)
-    return {"id": str(material.id), "name": material.name, "category": material.category,
-            "unit": material.unit, "unit_cost": float(material.unit_cost),
-            "supplier": material.supplier, "grade": material.grade,
-            "carbon_footprint": float(material.carbon_footprint) if material.carbon_footprint else None,
-            "availability": material.availability}
+    return _material_dict(material)
+
+
+def _material_dict(m: Material) -> dict:
+    return {
+        "id": str(m.id), "name": m.name, "category": m.category,
+        "unit": m.unit, "unit_cost": float(m.unit_cost),
+        "supplier": m.supplier, "grade": m.grade,
+        "carbon_footprint": float(m.carbon_footprint) if m.carbon_footprint else None,
+        "availability": m.availability,
+    }
+
+
+@app.get("/api/materials/{material_id}")
+async def get_material(
+    material_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    material = db.query(Material).filter(
+        Material.id == material_id,
+        Material.organisation_id == current_user.organisation_id,
+        Material.is_archived == False
+    ).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    return _material_dict(material)
+
+
+@app.put("/api/materials/{material_id}")
+async def update_material(
+    material_id: str,
+    data: MaterialUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    material = db.query(Material).filter(
+        Material.id == material_id,
+        Material.organisation_id == current_user.organisation_id,
+        Material.is_archived == False
+    ).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    for field, value in data.dict(exclude_unset=True).items():
+        setattr(material, field, value)
+    db.commit()
+    db.refresh(material)
+    return _material_dict(material)
+
+
+@app.delete("/api/materials/{material_id}", status_code=204)
+async def delete_material(
+    material_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    material = db.query(Material).filter(
+        Material.id == material_id,
+        Material.organisation_id == current_user.organisation_id,
+        Material.is_archived == False
+    ).first()
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    material.is_archived = True
+    db.commit()
+
+
+@app.get("/api/materials/prices/live")
+async def get_live_material_prices(
+    current_user: User = Depends(get_current_user),
+):
+    """Simulated real-time supplier price feed with market fluctuations."""
+    import random
+    BASE = {
+        "conc_20mpa":        {"name": "Concrete 20 MPa",        "base": 320.0,  "unit": "m³"},
+        "conc_25mpa":        {"name": "Concrete 25 MPa",        "base": 345.0,  "unit": "m³"},
+        "conc_30mpa":        {"name": "Concrete 30 MPa",        "base": 375.0,  "unit": "m³"},
+        "steel_rebar_16mm":  {"name": "Reinforcing Steel 16mm", "base": 3.20,   "unit": "kg"},
+        "timber_pine_rg15":  {"name": "Pine Radiata RG15",      "base": 1850.0, "unit": "m³"},
+        "aggregate_gap20":   {"name": "Gap 20 Basecourse",      "base": 42.0,   "unit": "tonne"},
+    }
+    prices = {}
+    for mat_id, info in BASE.items():
+        pct = round(random.uniform(-0.08, 0.12), 4)
+        prices[mat_id] = {
+            "name":       info["name"],
+            "unit":       info["unit"],
+            "unit_cost":  round(info["base"] * (1 + pct), 2),
+            "change_pct": round(pct * 100, 1),
+            "direction":  "up" if pct >= 0 else "down",
+        }
+    return {
+        "prices":    prices,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "source":    "NZ supplier price feed (simulated)",
+    }
 
 
 # ------------------------------
@@ -637,7 +766,7 @@ async def get_tasks(
 
 @app.post("/api/projects/{project_id}/tasks", status_code=201)
 async def create_task(
-    project_id: str, data: dict,
+    project_id: str, data: TaskCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -650,20 +779,80 @@ async def create_task(
     task = ScheduleTask(
         project_id=project_id,
         organisation_id=current_user.organisation_id,
-        name=data["name"],
-        start_date=data["start_date"], end_date=data["end_date"],
-        duration=data.get("duration"), progress=data.get("progress", 0),
-        status=data.get("status", "not_started"),
-        dependencies=data.get("dependencies", []),
-        assignee=data.get("assignee"),
+        name=data.name,
+        start_date=data.start_date, end_date=data.end_date,
+        duration=data.duration, progress=data.progress or 0,
+        status=data.status or "not_started",
+        dependencies=data.dependencies or [],
+        assignee=data.assignee,
     )
     db.add(task)
     db.commit()
     db.refresh(task)
-    return {"id": str(task.id), "name": task.name, "start_date": str(task.start_date),
-            "end_date": str(task.end_date), "duration": task.duration,
-            "progress": task.progress, "status": task.status,
-            "dependencies": task.dependencies or [], "assignee": task.assignee}
+    return _task_dict(task)
+
+
+def _task_dict(t: ScheduleTask) -> dict:
+    return {
+        "id": str(t.id), "name": t.name,
+        "start_date": str(t.start_date), "end_date": str(t.end_date),
+        "duration": t.duration, "progress": t.progress,
+        "status": t.status, "dependencies": t.dependencies or [],
+        "assignee": t.assignee,
+    }
+
+
+@app.get("/api/projects/{project_id}/tasks/{task_id}")
+async def get_task(
+    project_id: str, task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    task = db.query(ScheduleTask).filter(
+        ScheduleTask.id == task_id,
+        ScheduleTask.project_id == project_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return _task_dict(task)
+
+
+@app.put("/api/projects/{project_id}/tasks/{task_id}")
+async def update_task(
+    project_id: str, task_id: str, data: TaskUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    task = db.query(ScheduleTask).filter(
+        ScheduleTask.id == task_id,
+        ScheduleTask.project_id == project_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    for field, value in data.dict(exclude_unset=True).items():
+        setattr(task, field, value)
+    db.commit()
+    db.refresh(task)
+    return _task_dict(task)
+
+
+@app.delete("/api/projects/{project_id}/tasks/{task_id}", status_code=204)
+async def delete_task(
+    project_id: str, task_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    task = db.query(ScheduleTask).filter(
+        ScheduleTask.id == task_id,
+        ScheduleTask.project_id == project_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    db.delete(task)
+    db.commit()
 
 
 # ------------------------------
@@ -695,33 +884,91 @@ async def get_estimates(
 
 @app.post("/api/projects/{project_id}/estimates", status_code=201)
 async def create_estimate_item(
-    project_id: str, data: dict,
+    project_id: str, data: EstimateItemCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    project = db.query(Project).filter(
-        Project.id == project_id,
-        Project.organisation_id == current_user.organisation_id
-    ).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    qty = float(data["quantity"])
-    rate = float(data["rate"])
+    _assert_project_access(project_id, current_user, db)
+    qty = float(data.quantity)
+    rate = float(data.rate)
     item = EstimateItem(
         project_id=project_id,
         organisation_id=current_user.organisation_id,
-        description=data["description"],
-        quantity=qty, unit=data["unit"],
+        description=data.description,
+        quantity=qty, unit=data.unit,
         rate=rate, amount=round(qty * rate, 2),
-        category=data.get("category"),
+        category=data.category,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
-    return {"id": str(item.id), "description": item.description,
-            "quantity": float(item.quantity), "unit": item.unit,
-            "rate": float(item.rate), "amount": float(item.amount),
-            "category": item.category}
+    return _estimate_dict(item)
+
+
+def _estimate_dict(i: EstimateItem) -> dict:
+    return {
+        "id": str(i.id), "description": i.description,
+        "quantity": float(i.quantity), "unit": i.unit,
+        "rate": float(i.rate), "amount": float(i.amount),
+        "category": i.category,
+    }
+
+
+@app.get("/api/projects/{project_id}/estimates/{item_id}")
+async def get_estimate_item(
+    project_id: str, item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    item = db.query(EstimateItem).filter(
+        EstimateItem.id == item_id,
+        EstimateItem.project_id == project_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Estimate item not found")
+    return _estimate_dict(item)
+
+
+@app.put("/api/projects/{project_id}/estimates/{item_id}")
+async def update_estimate_item(
+    project_id: str, item_id: str, data: EstimateItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    item = db.query(EstimateItem).filter(
+        EstimateItem.id == item_id,
+        EstimateItem.project_id == project_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Estimate item not found")
+    updates = data.dict(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(item, field, value)
+    qty = float(item.quantity)
+    rate = float(item.rate)
+    item.amount = round(qty * rate, 2)
+    db.commit()
+    db.refresh(item)
+    return _estimate_dict(item)
+
+
+@app.delete("/api/projects/{project_id}/estimates/{item_id}", status_code=204)
+async def delete_estimate_item(
+    project_id: str, item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    item = db.query(EstimateItem).filter(
+        EstimateItem.id == item_id,
+        EstimateItem.project_id == project_id
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Estimate item not found")
+    db.delete(item)
+    db.commit()
 
 
 # ------------------------------
@@ -750,34 +997,266 @@ async def get_purchase_orders(
 
 @app.post("/api/procurement/purchase-orders", status_code=201)
 async def create_purchase_order(
-    data: dict,
+    data: PurchaseOrderCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     project = db.query(Project).filter(
-        Project.id == data["project_id"],
+        Project.id == str(data.project_id),
         Project.organisation_id == current_user.organisation_id
     ).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     po = PurchaseOrder(
-        project_id=data["project_id"],
+        project_id=str(data.project_id),
         organisation_id=current_user.organisation_id,
-        po_number=data["po_number"],
-        supplier_name=data["supplier_name"],
-        status=data.get("status", "draft"),
-        total_value=data.get("total_value", 0),
-        line_items=data.get("line_items", []),
+        po_number=data.po_number,
+        supplier_name=data.supplier_name,
+        status=data.status or "draft",
+        total_value=data.total_value or 0,
+        line_items=data.line_items or [],
         created_by=current_user.id,
     )
     db.add(po)
     db.commit()
     db.refresh(po)
-    return {"id": str(po.id), "po_number": po.po_number, "project_id": str(po.project_id),
-            "supplier_name": po.supplier_name, "status": po.status,
-            "total_value": float(po.total_value), "line_items": po.line_items or [],
-            "created_at": po.created_at.isoformat()}
+    return _po_dict(po)
+
+
+def _po_dict(p: PurchaseOrder) -> dict:
+    return {
+        "id": str(p.id), "po_number": p.po_number,
+        "project_id": str(p.project_id), "supplier_name": p.supplier_name,
+        "status": p.status, "total_value": float(p.total_value),
+        "line_items": p.line_items or [],
+        "created_at": p.created_at.isoformat(),
+    }
+
+
+@app.get("/api/procurement/purchase-orders/{po_id}")
+async def get_purchase_order(
+    po_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.organisation_id == current_user.organisation_id
+    ).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    return _po_dict(po)
+
+
+@app.put("/api/procurement/purchase-orders/{po_id}")
+async def update_purchase_order(
+    po_id: str, data: PurchaseOrderUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.organisation_id == current_user.organisation_id
+    ).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    for field, value in data.dict(exclude_unset=True).items():
+        setattr(po, field, value)
+    db.commit()
+    db.refresh(po)
+    return _po_dict(po)
+
+
+@app.delete("/api/procurement/purchase-orders/{po_id}", status_code=204)
+async def delete_purchase_order(
+    po_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    po = db.query(PurchaseOrder).filter(
+        PurchaseOrder.id == po_id,
+        PurchaseOrder.organisation_id == current_user.organisation_id
+    ).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    db.delete(po)
+    db.commit()
+
+
+# ------------------------------
+# Helper
+# ------------------------------
+def _assert_project_access(project_id: str, current_user: User, db: Session) -> None:
+    project = db.query(Project).filter(
+        Project.id == project_id,
+        Project.organisation_id == current_user.organisation_id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+# ------------------------------
+# Designs
+# ------------------------------
+def _design_dict(d: Design) -> dict:
+    return {
+        "id": str(d.id), "project_id": str(d.project_id),
+        "name": d.name, "type": d.type, "status": d.status,
+        "parameters": d.parameters,
+        "score": float(d.score) if d.score else None,
+        "cost_estimate": float(d.cost_estimate) if d.cost_estimate else None,
+        "structural_rating": d.structural_rating,
+        "compliance_status": d.compliance_status,
+        "drawing_data": d.drawing_data,
+        "created_at": d.created_at.isoformat(),
+        "updated_at": d.updated_at.isoformat(),
+    }
+
+
+@app.get("/api/projects/{project_id}/designs")
+async def get_designs(
+    project_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    designs = db.query(Design).filter(Design.project_id == project_id).order_by(Design.created_at.desc()).all()
+    return [_design_dict(d) for d in designs]
+
+
+@app.post("/api/projects/{project_id}/designs", status_code=201)
+async def create_design(
+    project_id: str, data: DesignCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    design = Design(
+        project_id=project_id,
+        name=data.name, type=data.type,
+        parameters=data.parameters,
+        status=data.status or "draft",
+        cost_estimate=data.cost_estimate,
+        structural_rating=data.structural_rating,
+        drawing_data=data.drawing_data,
+        created_by=current_user.id,
+    )
+    db.add(design)
+    db.commit()
+    db.refresh(design)
+    return _design_dict(design)
+
+
+@app.get("/api/projects/{project_id}/designs/{design_id}")
+async def get_design(
+    project_id: str, design_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    design = db.query(Design).filter(Design.id == design_id, Design.project_id == project_id).first()
+    if not design:
+        raise HTTPException(status_code=404, detail="Design not found")
+    return _design_dict(design)
+
+
+@app.put("/api/projects/{project_id}/designs/{design_id}")
+async def update_design(
+    project_id: str, design_id: str, data: DesignUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    design = db.query(Design).filter(Design.id == design_id, Design.project_id == project_id).first()
+    if not design:
+        raise HTTPException(status_code=404, detail="Design not found")
+    for field, value in data.dict(exclude_unset=True).items():
+        setattr(design, field, value)
+    db.commit()
+    db.refresh(design)
+    return _design_dict(design)
+
+
+@app.delete("/api/projects/{project_id}/designs/{design_id}", status_code=204)
+async def delete_design(
+    project_id: str, design_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    design = db.query(Design).filter(Design.id == design_id, Design.project_id == project_id).first()
+    if not design:
+        raise HTTPException(status_code=404, detail="Design not found")
+    db.delete(design)
+    db.commit()
+
+
+# Design alternatives
+
+def _alt_dict(a: DesignAlternative) -> dict:
+    return {
+        "id": str(a.id), "design_id": str(a.design_id),
+        "name": a.name, "variant": a.variant,
+        "parameters": a.parameters,
+        "score": float(a.score) if a.score else None,
+        "cost_estimate": float(a.cost_estimate) if a.cost_estimate else None,
+        "structural_rating": a.structural_rating,
+        "compliance_status": a.compliance_status,
+        "is_selected": a.is_selected,
+        "created_at": a.created_at.isoformat(),
+    }
+
+
+@app.get("/api/projects/{project_id}/designs/{design_id}/alternatives")
+async def get_design_alternatives(
+    project_id: str, design_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    alts = db.query(DesignAlternative).filter(DesignAlternative.design_id == design_id).all()
+    return [_alt_dict(a) for a in alts]
+
+
+@app.post("/api/projects/{project_id}/designs/{design_id}/alternatives", status_code=201)
+async def create_design_alternative(
+    project_id: str, design_id: str, data: DesignAlternativeCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    design = db.query(Design).filter(Design.id == design_id, Design.project_id == project_id).first()
+    if not design:
+        raise HTTPException(status_code=404, detail="Design not found")
+    alt = DesignAlternative(
+        design_id=design_id,
+        name=data.name, variant=data.variant,
+        parameters=data.parameters,
+        cost_estimate=data.cost_estimate,
+        structural_rating=data.structural_rating,
+    )
+    db.add(alt)
+    db.commit()
+    db.refresh(alt)
+    return _alt_dict(alt)
+
+
+@app.delete("/api/projects/{project_id}/designs/{design_id}/alternatives/{alt_id}", status_code=204)
+async def delete_design_alternative(
+    project_id: str, design_id: str, alt_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    _assert_project_access(project_id, current_user, db)
+    alt = db.query(DesignAlternative).filter(
+        DesignAlternative.id == alt_id,
+        DesignAlternative.design_id == design_id
+    ).first()
+    if not alt:
+        raise HTTPException(status_code=404, detail="Design alternative not found")
+    db.delete(alt)
+    db.commit()
 
 
 # ------------------------------
@@ -1001,7 +1480,7 @@ async def upload_project_attachment(project_id: str, file: UploadFile = File(...
         raise HTTPException(status_code=403, detail="File type is blocked for security reasons")
     
     if file.content_type and file.content_type not in ALLOWED_MIME_TYPES:
-        logging.warning(f"Unusual file type uploaded: {file.content_type} - {file.filename}")
+        raise HTTPException(status_code=415, detail=f"File type '{file.content_type}' is not allowed")
     
     stored_filename = f"{uuid4()}.{file_ext}"
     
@@ -1016,14 +1495,14 @@ async def upload_project_attachment(project_id: str, file: UploadFile = File(...
         b'<?php', b'<%', b'<%@',
         b'#!/bin/bash', b'#!/usr/bin/env'
     ]
-    
+
     while chunk := await file.read(8192):
         file_hash.update(chunk)
         file_size += len(chunk)
-        
+        chunk_lower = chunk.lower()
         for pattern in dangerous_patterns:
-            if pattern in chunk.lower():
-                logging.warning(f"Dangerous content detected in upload: {pattern} from user {current_user.id}")
+            if pattern in chunk_lower:
+                logging.warning(f"Dangerous content detected in upload from user {current_user.id}: {pattern}")
                 raise HTTPException(status_code=403, detail="File contains dangerous content")
     
     attachment = ProjectAttachment(
@@ -1285,14 +1764,18 @@ from integrations import integration_system, AI_ENABLED
 
 @app.get("/api/ai/status")
 async def ai_status():
-    """Returns whether the optional AI integration is configured and active."""
+    """Returns whether an AI provider is configured and which one."""
+    from lib.ai_engine import ai_engine as _ai_engine
     return {
-        "ai_enabled": AI_ENABLED,
-        "mode": "ai" if AI_ENABLED else "rule_based",
+        "ai_enabled": _ai_engine.is_enabled,
+        "provider": _ai_engine.provider or None,
+        "provider_label": _ai_engine.provider_label if _ai_engine.is_enabled else None,
+        "model": _ai_engine.model or None,
+        "mode": "ai" if _ai_engine.is_enabled else "rule_based",
         "info": (
-            "AI features active — set AI_ENABLED=false to disable."
-            if AI_ENABLED
-            else "Running in rule-based mode. Set AI_ENABLED=true in .env to activate AI features."
+            f"AI active via {_ai_engine.provider_label} ({_ai_engine.model})."
+            if _ai_engine.is_enabled
+            else "Running in rule-based mode. Set AI_PROVIDER + AI_API_KEY in .env to activate."
         ),
     }
 

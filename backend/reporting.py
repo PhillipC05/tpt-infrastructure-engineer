@@ -44,7 +44,7 @@ class ReportStatus(str, Enum):
 class ReportSection(BaseModel):
     section_id: str
     title: str
-    content: Any
+    content: Any = None
     order: int
     visible: bool = True
     required: bool = False

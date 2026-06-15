@@ -4,7 +4,6 @@ import { Button } from '../components/ui/Button';
 
 export default function Viewer3DPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [modelLoaded, setModelLoaded] = useState(false);
   const [viewMode, setViewMode] = useState<'perspective' | 'top' | 'front' | 'side'>('perspective');
   const [zoom, setZoom] = useState(100);
 

@@ -17,7 +17,7 @@ class TestReportGenerator:
     def test_template_loading(self, report_generator):
         """Test that all default templates load correctly"""
         templates = report_generator.get_available_templates()
-        assert len(templates) == 5
+        assert len(templates) == 6
         
         feasibility_templates = report_generator.get_available_templates(ReportType.FEASIBILITY)
         assert len(feasibility_templates) == 1

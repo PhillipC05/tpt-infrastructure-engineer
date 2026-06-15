@@ -65,7 +65,6 @@ export const KeyboardShortcutsProvider: React.FC<{ children: React.ReactNode }> 
       const isCtrlPressed = e.ctrlKey;
       const isMetaPressed = e.metaKey;
       const isShiftPressed = e.shiftKey;
-      const isAltPressed = e.altKey;
 
       if ((e.key === '?' && isShiftPressed) || (e.key === '/' && isShiftPressed)) {
         e.preventDefault();

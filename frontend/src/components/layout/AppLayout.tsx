@@ -11,7 +11,10 @@ import {
   DocumentTextIcon,
   ShoppingCartIcon,
   CogIcon,
-  ArrowRightOnRectangleIcon
+  ArrowRightOnRectangleIcon,
+  MapIcon,
+  CpuChipIcon,
+  QrCodeIcon,
 } from '@heroicons/react/24/outline';
 
 interface NavItem {
@@ -26,6 +29,18 @@ export const AppLayout = () => {
   const logout = useAuthStore(state => state.logout);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [aiOpen, setAIOpen] = useState(false);
+  const [offline, setOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const goOnline  = () => setOffline(false);
+    const goOffline = () => setOffline(true);
+    window.addEventListener('online',  goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online',  goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -39,13 +54,16 @@ export const AppLayout = () => {
   }, []);
 
   const navigationItems: NavItem[] = [
-    { name: 'Dashboard', icon: <HomeIcon className="w-5 h-5" />, path: '/dashboard' },
-    { name: 'Projects', icon: <CubeIcon className="w-5 h-5" />, path: '/projects' },
-    { name: 'Estimator', icon: <CalculatorIcon className="w-5 h-5" />, path: '/estimator' },
-    { name: 'Schedule', icon: <CalendarIcon className="w-5 h-5" />, path: '/schedule' },
-    { name: 'Reports', icon: <DocumentTextIcon className="w-5 h-5" />, path: '/reports' },
-    { name: 'Procurement', icon: <ShoppingCartIcon className="w-5 h-5" />, path: '/procurement' },
-    { name: 'Settings', icon: <CogIcon className="w-5 h-5" />, path: '/settings' },
+    { name: 'Dashboard',    icon: <HomeIcon className="w-5 h-5" />,         path: '/dashboard' },
+    { name: 'Projects',     icon: <CubeIcon className="w-5 h-5" />,         path: '/projects' },
+    { name: 'Estimator',    icon: <CalculatorIcon className="w-5 h-5" />,   path: '/estimator' },
+    { name: 'Schedule',     icon: <CalendarIcon className="w-5 h-5" />,     path: '/schedule' },
+    { name: 'Reports',      icon: <DocumentTextIcon className="w-5 h-5" />, path: '/reports' },
+    { name: 'Procurement',  icon: <ShoppingCartIcon className="w-5 h-5" />, path: '/procurement' },
+    { name: 'Drone Survey', icon: <MapIcon className="w-5 h-5" />,          path: '/drone-survey' },
+    { name: 'Digital Twin', icon: <CpuChipIcon className="w-5 h-5" />,      path: '/digital-twin' },
+    { name: 'QR Signs',     icon: <QrCodeIcon className="w-5 h-5" />,       path: '/qr-signs' },
+    { name: 'Settings',     icon: <CogIcon className="w-5 h-5" />,          path: '/settings' },
   ];
 
   const handleLogout = async () => {
@@ -102,6 +120,11 @@ export const AppLayout = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {offline && (
+          <div className="bg-amber-500 text-white text-center text-xs font-semibold py-1.5 shrink-0">
+            You are offline — cached data is shown
+          </div>
+        )}
         <header className="bg-white shadow-sm h-16 flex items-center px-6 justify-between">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}

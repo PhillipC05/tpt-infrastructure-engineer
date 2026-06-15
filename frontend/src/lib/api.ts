@@ -61,6 +61,17 @@ export const api = {
     return !!localStorage.getItem(TOKEN_KEY);
   },
 
+  async register(data: {
+    email: string;
+    password: string;
+    first_name: string;
+    last_name: string;
+    organisation_name?: string;
+  }): Promise<User> {
+    const { data: user } = await client.post<User>('/auth/register', data);
+    return user;
+  },
+
   async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const params = new URLSearchParams();
     params.append('username', credentials.username);
@@ -145,6 +156,20 @@ export const api = {
     return data;
   },
 
+  async getMaterial(id: string): Promise<any> {
+    const { data } = await client.get(`/api/materials/${id}`);
+    return data;
+  },
+
+  async updateMaterial(id: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.put(`/api/materials/${id}`, payload);
+    return data;
+  },
+
+  async deleteMaterial(id: string): Promise<void> {
+    await client.delete(`/api/materials/${id}`);
+  },
+
   async getProjectTasks(projectId: string): Promise<any[]> {
     const { data } = await client.get(`/api/projects/${projectId}/tasks`);
     return data;
@@ -155,6 +180,15 @@ export const api = {
     return data;
   },
 
+  async updateProjectTask(projectId: string, taskId: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.put(`/api/projects/${projectId}/tasks/${taskId}`, payload);
+    return data;
+  },
+
+  async deleteProjectTask(projectId: string, taskId: string): Promise<void> {
+    await client.delete(`/api/projects/${projectId}/tasks/${taskId}`);
+  },
+
   async getProjectEstimates(projectId: string): Promise<any[]> {
     const { data } = await client.get(`/api/projects/${projectId}/estimates`);
     return data;
@@ -163,6 +197,15 @@ export const api = {
   async createEstimateItem(projectId: string, payload: Record<string, unknown>): Promise<any> {
     const { data } = await client.post(`/api/projects/${projectId}/estimates`, payload);
     return data;
+  },
+
+  async updateEstimateItem(projectId: string, itemId: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.put(`/api/projects/${projectId}/estimates/${itemId}`, payload);
+    return data;
+  },
+
+  async deleteEstimateItem(projectId: string, itemId: string): Promise<void> {
+    await client.delete(`/api/projects/${projectId}/estimates/${itemId}`);
   },
 
   async getProjectComments(projectId: string): Promise<any[]> {
@@ -208,6 +251,49 @@ export const api = {
     return data;
   },
 
+  async getPurchaseOrder(id: string): Promise<any> {
+    const { data } = await client.get(`/api/procurement/purchase-orders/${id}`);
+    return data;
+  },
+
+  async updatePurchaseOrder(id: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.put(`/api/procurement/purchase-orders/${id}`, payload);
+    return data;
+  },
+
+  async deletePurchaseOrder(id: string): Promise<void> {
+    await client.delete(`/api/procurement/purchase-orders/${id}`);
+  },
+
+  async getProjectDesigns(projectId: string): Promise<any[]> {
+    const { data } = await client.get(`/api/projects/${projectId}/designs`);
+    return data;
+  },
+
+  async createProjectDesign(projectId: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.post(`/api/projects/${projectId}/designs`, payload);
+    return data;
+  },
+
+  async updateProjectDesign(projectId: string, designId: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.put(`/api/projects/${projectId}/designs/${designId}`, payload);
+    return data;
+  },
+
+  async deleteProjectDesign(projectId: string, designId: string): Promise<void> {
+    await client.delete(`/api/projects/${projectId}/designs/${designId}`);
+  },
+
+  async getDesignAlternatives(projectId: string, designId: string): Promise<any[]> {
+    const { data } = await client.get(`/api/projects/${projectId}/designs/${designId}/alternatives`);
+    return data;
+  },
+
+  async createDesignAlternative(projectId: string, designId: string, payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.post(`/api/projects/${projectId}/designs/${designId}/alternatives`, payload);
+    return data;
+  },
+
   async getBoms(skip = 0, limit = 50): Promise<{ data: any[]; total: number }> {
     const response = await client.get('/api/procurement/boms', { params: { skip, limit } });
     return { data: response.data, total: getTotal(response) };
@@ -248,6 +334,16 @@ export const api = {
       question,
       project_id: projectId,
     });
+    return data;
+  },
+
+  async aiAssist(prompt: string, contextType?: string): Promise<string> {
+    const { data } = await client.post('/api/ai/assist', { prompt, context_type: contextType });
+    return data?.result ?? data?.response ?? data?.message ?? String(data);
+  },
+
+  async getAiStatus(): Promise<any> {
+    const { data } = await client.get('/api/ai/status');
     return data;
   },
 

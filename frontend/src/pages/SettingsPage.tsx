@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/api';
-import { useTranslation } from 'react-i18next';
 
 type Section = 'profile' | 'security' | 'preferences';
 
 export default function SettingsPage() {
   const { user, fetchCurrentUser } = useAuthStore();
-  const { i18n } = useTranslation();
   const [section, setSection] = useState<Section>('profile');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -25,8 +23,6 @@ export default function SettingsPage() {
   const [darkMode, setDarkMode] = useState(
     localStorage.getItem('tpt_dark_mode') === 'true'
   );
-  const [language, setLanguage] = useState(i18n.language || 'en');
-
   useEffect(() => {
     if (user) {
       setFirstName(user.first_name);
@@ -76,12 +72,6 @@ export default function SettingsPage() {
     localStorage.setItem('tpt_dark_mode', String(enabled));
     document.documentElement.setAttribute('data-theme', enabled ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark', enabled);
-  }
-
-  function applyLanguage(lang: string) {
-    setLanguage(lang);
-    localStorage.setItem('tpt_lang', lang);
-    i18n.changeLanguage(lang);
   }
 
   const navItems: { id: Section; label: string }[] = [
@@ -244,27 +234,6 @@ export default function SettingsPage() {
                 </label>
               </div>
 
-              <div>
-                <h3 className="text-sm font-medium text-gray-900 mb-2">Language / Reo</h3>
-                <div className="flex gap-2">
-                  {[
-                    { code: 'en', label: 'English' },
-                    { code: 'mi', label: 'Te Reo Māori' },
-                  ].map(({ code, label }) => (
-                    <button
-                      key={code}
-                      onClick={() => applyLanguage(code)}
-                      className={`px-4 py-2 text-sm rounded-md border transition-colors ${
-                        language === code
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           )}
         </div>

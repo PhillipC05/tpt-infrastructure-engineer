@@ -16,6 +16,9 @@ import ProcurementPage from './pages/ProcurementPage';
 import DrawingsPage from './pages/DrawingsPage';
 import Viewer3DPage from './pages/Viewer3DPage';
 import SettingsPage from './pages/SettingsPage';
+import DroneSurveyPage from './pages/DroneSurveyPage';
+import DigitalTwinPage from './pages/DigitalTwinPage';
+import QRSignsPage from './pages/QRSignsPage';
 
 function App() {
   return (
@@ -40,6 +43,9 @@ function App() {
           <Route path="viewer3d" element={<Viewer3DPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="procurement" element={<ProcurementPage />} />
+          <Route path="drone-survey" element={<DroneSurveyPage />} />
+          <Route path="digital-twin" element={<DigitalTwinPage />} />
+          <Route path="qr-signs" element={<QRSignsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
 

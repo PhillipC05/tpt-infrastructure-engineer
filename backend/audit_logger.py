@@ -2,7 +2,24 @@ from sqlalchemy.orm import Session
 from fastapi import Request
 from models import AuditLog, User
 import json
+from decimal import Decimal
+from datetime import datetime, date
+from uuid import UUID
 from typing import Optional, Any
+
+
+def _sanitize(value):
+    if isinstance(value, dict):
+        return {k: _sanitize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize(v) for v in value]
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
+    return value
 
 
 class AuditLogger:
@@ -28,8 +45,8 @@ class AuditLogger:
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
-            old_values=old_values,
-            new_values=new_values,
+            old_values=_sanitize(old_values),
+            new_values=_sanitize(new_values),
             ip_address=ip_address,
             user_agent=user_agent
         )

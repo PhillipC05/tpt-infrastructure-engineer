@@ -61,7 +61,7 @@ export default function ReportGenerator() {
 
   useEffect(() => {
     api.getReportTemplates().then(setTemplates).catch(() => {});
-    api.getReports().then(setReports).catch(() => {});
+    api.getReports().then(r => setReports(r.data)).catch(() => {});
   }, []);
 
   const selectedTemplate = templates.find(t => t.template_id === selectedTemplateId);

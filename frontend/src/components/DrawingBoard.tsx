@@ -78,7 +78,7 @@ export const DrawingBoard: React.FC = () => {
       canvas.defaultCursor = 'text';
       canvas.selection = false;
       canvas.on('mouse:down', (opt) => {
-        const pointer = canvas.getPointer(opt.e);
+        const pointer = opt.scenePoint;
         const text = new IText('Type here', {
           left: pointer.x,
           top: pointer.y,
@@ -100,7 +100,7 @@ export const DrawingBoard: React.FC = () => {
     canvas.defaultCursor = 'crosshair';
 
     canvas.on('mouse:down', (opt) => {
-      const pointer = canvas.getPointer(opt.e);
+      const pointer = opt.scenePoint;
       isDrawingRef.current = true;
       startPointRef.current = { x: pointer.x, y: pointer.y };
 
@@ -139,7 +139,7 @@ export const DrawingBoard: React.FC = () => {
 
     canvas.on('mouse:move', (opt) => {
       if (!isDrawingRef.current || !startPointRef.current || !activeShapeRef.current) return;
-      const pointer = canvas.getPointer(opt.e);
+      const pointer = opt.scenePoint;
       const { x: ox, y: oy } = startPointRef.current;
 
       if (activeTool === 'rectangle') {

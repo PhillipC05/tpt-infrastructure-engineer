@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { formatDate } from '../lib/utils';
@@ -18,7 +18,7 @@ interface Drawing {
 }
 
 export default function DrawingsPage() {
-  const [drawings, setDrawings] = useState<Drawing[]>([
+  const [drawings] = useState<Drawing[]>([
     {
       id: '1',
       name: 'Site Layout Plan',

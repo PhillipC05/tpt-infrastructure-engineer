@@ -1,6 +1,6 @@
 {/* frontend/src/components/NotificationCentre.tsx */}
 import React, { useState, useEffect } from 'react';
-import { Bell, Check, Trash2, Clock, FileText, AlertTriangle, MessageSquare } from 'lucide-react';
+import { Bell, Trash2, Clock, FileText, AlertTriangle, MessageSquare } from 'lucide-react';
 import { api } from '../lib/api';
 
 const getIcon = (notificationType: string) => {

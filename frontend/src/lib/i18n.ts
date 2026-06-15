@@ -28,42 +28,11 @@ const en = {
   },
 };
 
-// Te Reo Māori translations
-const mi = {
-  navigation: {
-    dashboard: 'Papatohu',
-    projects: 'Kaupapa',
-    drawings: 'Tuhinga',
-    estimates: 'Tatau Utu',
-    schedule: 'Hōtaka',
-    materials: 'Rauemi',
-    reports: 'Pūrongo',
-    procurement: 'Hoko',
-    settings: 'Tautuhinga',
-    feasibility: 'Āheinga',
-    viewer3d: 'Tirohanga 3D',
-  },
-  common: {
-    loading: 'E tukituki ana…',
-    error: 'He hapa kei roto',
-    save: 'Tiaki',
-    cancel: 'Whakakore',
-    delete: 'Muku',
-    edit: 'Whakatika',
-    create: 'Waihanga',
-    search: 'Rapu',
-    noData: 'Kāore he raraunga',
-  },
-};
-
 i18n
   .use(initReactI18next)
   .init({
-    resources: {
-      en: { translation: en },
-      mi: { translation: mi },
-    },
-    lng: localStorage.getItem('tpt_lang') || 'en',
+    resources: { en: { translation: en } },
+    lng: 'en',
     fallbackLng: 'en',
     interpolation: { escapeValue: false },
   });
