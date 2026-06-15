@@ -1,12 +1,12 @@
 // frontend/src/components/VersionDiffViewer.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { api } from '../lib/api';
 
 interface Version {
   id: string;
-  version: string;
-  author: string;
-  timestamp: string;
-  note: string;
+  version_number: number;
+  created_at: string;
+  data: Record<string, unknown>;
 }
 
 interface DiffChange {
@@ -16,36 +16,57 @@ interface DiffChange {
   type: 'added' | 'removed' | 'modified';
 }
 
-const mockVersions: Version[] = [
-  { id: 'v4', version: '4.0', author: 'Phillip C', timestamp: '2026-04-22 10:30', note: 'Final structural adjustments' },
-  { id: 'v3', version: '3.0', author: 'John D', timestamp: '2026-04-21 16:45', note: 'Updated material costs' },
-  { id: 'v2', version: '2.0', author: 'Sarah M', timestamp: '2026-04-20 09:15', note: 'Added contingency allowance' },
-  { id: 'v1', version: '1.0', author: 'System', timestamp: '2026-04-19 14:00', note: 'Initial estimate created' },
-];
+function diffVersions(older: Record<string, unknown>, newer: Record<string, unknown>): DiffChange[] {
+  const allKeys = new Set([...Object.keys(older), ...Object.keys(newer)]);
+  const changes: DiffChange[] = [];
+  for (const key of allKeys) {
+    if (!(key in older)) {
+      changes.push({ field: key, oldValue: '—', newValue: String(newer[key] ?? ''), type: 'added' });
+    } else if (!(key in newer)) {
+      changes.push({ field: key, oldValue: String(older[key] ?? ''), newValue: '—', type: 'removed' });
+    } else if (String(older[key]) !== String(newer[key])) {
+      changes.push({ field: key, oldValue: String(older[key] ?? ''), newValue: String(newer[key] ?? ''), type: 'modified' });
+    }
+  }
+  return changes;
+}
 
-const mockDiffData: DiffChange[] = [
-  { field: 'Total Estimated Cost', oldValue: 125000, newValue: 132500, type: 'modified' },
-  { field: 'Contingency %', oldValue: 5, newValue: 7.5, type: 'modified' },
-  { field: 'Concrete Volume (m³)', oldValue: 42, newValue: 48, type: 'modified' },
-  { field: 'Steel Reinforcement (ton)', oldValue: 12, newValue: 14.5, type: 'modified' },
-  { field: 'Construction Duration', oldValue: '12 weeks', newValue: '14 weeks', type: 'modified' },
-  { field: 'Risk Rating', oldValue: 'Low', newValue: 'Medium', type: 'modified' },
-];
+interface Props {
+  projectId?: string;
+}
 
-export const VersionDiffViewer: React.FC = () => {
-  const [leftVersion, setLeftVersion] = useState(mockVersions[1].id);
-  const [rightVersion, setRightVersion] = useState(mockVersions[0].id);
+export const VersionDiffViewer: React.FC<Props> = ({ projectId }) => {
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [leftVersion, setLeftVersion] = useState('');
+  const [rightVersion, setRightVersion] = useState('');
   const [viewMode, setViewMode] = useState<'split' | 'unified' | 'inline'>('inline');
 
-  const formatDate = (timestamp: string) => {
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true);
+    api.getProjectVersions(projectId)
+      .then(data => {
+        setVersions(data);
+        if (data.length >= 2) {
+          setLeftVersion(data[1].id);
+          setRightVersion(data[0].id);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [projectId]);
+
+  const leftVer = versions.find(v => v.id === leftVersion);
+  const rightVer = versions.find(v => v.id === rightVersion);
+  const diffData: DiffChange[] =
+    leftVer && rightVer ? diffVersions(leftVer.data as Record<string, unknown>, rightVer.data as Record<string, unknown>) : [];
+
+  function formatDate(timestamp: string) {
     return new Date(timestamp).toLocaleString('en-NZ', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+      day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
     });
-  };
+  }
 
   const getChangeColor = (type: string) => {
     switch (type) {
@@ -56,11 +77,35 @@ export const VersionDiffViewer: React.FC = () => {
     }
   };
 
+  if (!projectId) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
+        Select a project to view version history.
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
+        Loading versions…
+      </div>
+    );
+  }
+
+  if (versions.length < 2) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
+        {versions.length === 0 ? 'No version history found.' : 'At least two versions are needed to compare.'}
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded-lg border border-gray-200">
       <div className="px-4 py-3 border-b border-gray-200">
         <h3 className="font-semibold text-gray-900 mb-3">Version Comparison</h3>
-        
+
         <div className="flex items-center gap-4 mb-3">
           <div className="flex-1">
             <label className="block text-xs text-gray-500 mb-1">Compare</label>
@@ -69,18 +114,18 @@ export const VersionDiffViewer: React.FC = () => {
               onChange={(e) => setLeftVersion(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
             >
-              {mockVersions.map(v => (
-                <option key={v.id} value={v.id}>Version {v.version} - {v.author}</option>
+              {versions.map(v => (
+                <option key={v.id} value={v.id}>v{v.version_number} — {formatDate(v.created_at)}</option>
               ))}
             </select>
           </div>
-          
+
           <div className="text-gray-400 pt-5">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
             </svg>
           </div>
-          
+
           <div className="flex-1">
             <label className="block text-xs text-gray-500 mb-1">Against</label>
             <select
@@ -88,8 +133,8 @@ export const VersionDiffViewer: React.FC = () => {
               onChange={(e) => setRightVersion(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md"
             >
-              {mockVersions.map(v => (
-                <option key={v.id} value={v.id}>Version {v.version} - {v.author}</option>
+              {versions.map(v => (
+                <option key={v.id} value={v.id}>v{v.version_number} — {formatDate(v.created_at)}</option>
               ))}
             </select>
           </div>
@@ -113,7 +158,10 @@ export const VersionDiffViewer: React.FC = () => {
       </div>
 
       <div className="divide-y divide-gray-100">
-        {mockDiffData.map((change, index) => (
+        {diffData.length === 0 && (
+          <div className="px-4 py-6 text-center text-sm text-gray-500">No differences found between these versions.</div>
+        )}
+        {diffData.map((change, index) => (
           <div key={index} className={`px-4 py-3 ${getChangeColor(change.type)}`}>
             <div className="flex items-center justify-between mb-1">
               <span className="font-medium text-gray-900">{change.field}</span>
@@ -153,10 +201,7 @@ export const VersionDiffViewer: React.FC = () => {
       </div>
 
       <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 text-sm text-gray-600">
-        <div className="flex items-center justify-between">
-          <span>Showing {mockDiffData.length} changes between versions</span>
-          <button className="text-blue-600 hover:text-blue-700 font-medium">Restore this version</button>
-        </div>
+        <span>Showing {diffData.length} change{diffData.length !== 1 ? 's' : ''} between versions</span>
       </div>
     </div>
   );

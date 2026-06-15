@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { api } from '../lib/api';
+import { DashboardCharts } from '../components/DashboardCharts';
 
 interface ActivityItem {
   id: string;
@@ -20,6 +21,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [projectCount, setProjectCount] = useState(0);
+  const [apiStats, setApiStats] = useState<any>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -27,12 +29,14 @@ export default function DashboardPage() {
 
   async function loadDashboardData() {
     try {
-      const [activityData, projectData] = await Promise.all([
+      const [activityData, projectData, statsData] = await Promise.all([
         api.getActivityFeed(10),
         api.getProjects(0, 1),
+        api.getStats(),
       ]);
       setActivities(activityData);
       setProjectCount(projectData.total);
+      setApiStats(statsData);
     } catch (err) {
       setError('Failed to load dashboard data. Using fallback data.');
     } finally {
@@ -41,7 +45,7 @@ export default function DashboardPage() {
   }
 
   const stats = [
-    { label: 'Active Projects', value: String(projectCount || 12), change: '+3 this month' },
+    { label: 'Active Projects', value: String(projectCount || 0), change: '+3 this month' },
     { label: 'Total Estimates', value: '$4.2M', change: '+12% vs last quarter' },
     { label: 'Pending Approvals', value: '8', change: '2 due today' },
     { label: 'Team Members', value: '16', change: '5 online now' },
@@ -139,6 +143,12 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <DashboardCharts
+        costData={apiStats?.cost_breakdown}
+        tradeBreakdown={apiStats?.trade_breakdown}
+        projectProgress={apiStats?.project_progress}
+      />
     </div>
   );
 }

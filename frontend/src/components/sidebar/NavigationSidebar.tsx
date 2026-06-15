@@ -1,17 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
-
-const navigation = [
-  { name: 'Dashboard', to: '/', icon: 'home' },
-  { name: 'Projects', to: '/projects', icon: 'folder' },
-  { name: 'Drawings', to: '/drawings', icon: 'pencil' },
-  { name: 'Estimates', to: '/estimates', icon: 'calculator' },
-  { name: 'Schedule', to: '/schedule', icon: 'calendar' },
-  { name: 'Materials', to: '/materials', icon: 'cube' },
-  { name: 'Reports', to: '/reports', icon: 'document' },
-  { name: 'Procurement', to: '/procurement', icon: 'shopping' },
-  { name: 'Settings', to: '/settings', icon: 'cog' },
-];
+import { useAuthStore } from '../../store/authStore';
 
 const icons = {
   home: (
@@ -60,10 +50,35 @@ const icons = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     </svg>
   ),
+  globe: (
+    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
 };
 
 export default function NavigationSidebar() {
   const location = useLocation();
+  const { t } = useTranslation();
+  const { user } = useAuthStore();
+
+  const navigation = [
+    { name: t('navigation.dashboard'), to: '/dashboard', icon: 'home' },
+    { name: t('navigation.projects'), to: '/projects', icon: 'folder' },
+    { name: t('navigation.drawings'), to: '/drawings', icon: 'pencil' },
+    { name: t('navigation.estimates'), to: '/estimator', icon: 'calculator' },
+    { name: t('navigation.schedule'), to: '/schedule', icon: 'calendar' },
+    { name: t('navigation.materials'), to: '/materials', icon: 'cube' },
+    { name: t('navigation.reports'), to: '/reports', icon: 'document' },
+    { name: t('navigation.procurement'), to: '/procurement', icon: 'shopping' },
+    { name: t('navigation.settings'), to: '/settings', icon: 'cog' },
+  ];
+
+  const initials = user
+    ? `${user.first_name[0] ?? ''}${user.last_name[0] ?? ''}`.toUpperCase()
+    : '??';
+  const displayName = user ? `${user.first_name} ${user.last_name}` : 'Loading…';
+  const displayEmail = user?.email ?? '';
 
   return (
     <div className="flex flex-col h-full w-64 bg-gray-900 text-white">
@@ -76,9 +91,8 @@ export default function NavigationSidebar() {
         <ul className="space-y-1 px-3">
           {navigation.map((item) => {
             const isActive = location.pathname === item.to;
-            
             return (
-              <li key={item.name}>
+              <li key={item.to}>
                 <NavLink
                   to={item.to}
                   className={cn(
@@ -99,12 +113,12 @@ export default function NavigationSidebar() {
 
       <div className="p-4 border-t border-gray-800">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-            AD
+          <div className="h-9 w-9 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium text-sm">
+            {initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">Admin User</p>
-            <p className="text-xs text-gray-400 truncate">admin@tpt.com</p>
+            <p className="text-sm font-medium truncate">{displayName}</p>
+            <p className="text-xs text-gray-400 truncate">{displayEmail}</p>
           </div>
         </div>
       </div>

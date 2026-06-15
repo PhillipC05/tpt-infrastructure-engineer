@@ -15,6 +15,7 @@ import ReportsPage from './pages/ReportsPage';
 import ProcurementPage from './pages/ProcurementPage';
 import DrawingsPage from './pages/DrawingsPage';
 import Viewer3DPage from './pages/Viewer3DPage';
+import SettingsPage from './pages/SettingsPage';
 
 function App() {
   return (
@@ -39,7 +40,7 @@ function App() {
           <Route path="viewer3d" element={<Viewer3DPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="procurement" element={<ProcurementPage />} />
-          <Route path="settings" element={<DashboardPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

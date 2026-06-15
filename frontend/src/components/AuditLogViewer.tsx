@@ -1,24 +1,29 @@
 {/* frontend/src/components/AuditLogViewer.tsx */}
-import React, { useState } from 'react';
-import { Search, Filter, User, FileEdit, Trash2, Eye, Download, Plus } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, FileEdit, Trash2, Eye, Download, Plus } from 'lucide-react';
+import { api } from '../lib/api';
 
 interface AuditEntry {
-  id: number;
+  id: string;
   timestamp: string;
   user: string;
-  action: 'create' | 'update' | 'delete' | 'view' | 'download';
+  action: string;
   resource: string;
   details: string;
   ipAddress: string;
 }
 
-const mockAuditLogs: AuditEntry[] = [
-  { id: 1, timestamp: '2026-04-23 09:24:12', user: 'Phillip C', action: 'update', resource: 'Project #123', details: 'Updated cost estimate', ipAddress: '192.168.1.45' },
-  { id: 2, timestamp: '2026-04-23 08:52:47', user: 'Sarah M', action: 'create', resource: 'Drawing #456', details: 'Uploaded site_plan.dwg', ipAddress: '192.168.1.67' },
-  { id: 3, timestamp: '2026-04-23 08:15:33', user: 'John D', action: 'delete', resource: 'Material #789', details: 'Removed obsolete material', ipAddress: '192.168.1.22' },
-  { id: 4, timestamp: '2026-04-23 07:41:09', user: 'System', action: 'download', resource: 'Report #321', details: 'Generated feasibility report', ipAddress: '127.0.0.1' },
-  { id: 5, timestamp: '2026-04-22 16:32:55', user: 'Phillip C', action: 'view', resource: 'Project #123', details: 'Viewed project timeline', ipAddress: '192.168.1.45' },
-];
+function mapActivity(item: any): AuditEntry {
+  return {
+    id: String(item.id),
+    timestamp: item.created_at ? new Date(item.created_at).toLocaleString('en-NZ') : '',
+    user: item.user ? `${item.user.first_name} ${item.user.last_name}` : 'System',
+    action: item.action_type ?? item.action ?? 'update',
+    resource: item.entity_type ? `${item.entity_type} ${item.entity_id ? `#${String(item.entity_id).slice(0, 8)}` : ''}` : '—',
+    details: item.changes ? JSON.stringify(item.changes).slice(0, 80) : item.description ?? '',
+    ipAddress: item.ip_address ?? '—',
+  };
+}
 
 const getActionIcon = (action: string) => {
   switch (action) {
@@ -32,10 +37,19 @@ const getActionIcon = (action: string) => {
 };
 
 export const AuditLogViewer: React.FC = () => {
+  const [logs, setLogs] = useState<AuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterAction, setFilterAction] = useState('all');
 
-  const filteredLogs = mockAuditLogs.filter(log => {
+  useEffect(() => {
+    api.getActivityFeed(100)
+      .then(data => setLogs(data.map(mapActivity)))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filteredLogs = logs.filter((log: AuditEntry) => {
     const matchesSearch = log.user.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           log.resource.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesFilter = filterAction === 'all' || log.action === filterAction;
@@ -46,7 +60,9 @@ export const AuditLogViewer: React.FC = () => {
     <div className="bg-white rounded-lg border border-gray-200">
       <div className="p-4 border-b border-gray-200">
         <div className="flex items-center gap-4">
-          <h3 className="font-semibold text-gray-900">Audit Log</h3>
+          <h3 className="font-semibold text-gray-900">
+            Audit Log{loading && <span className="ml-2 text-xs font-normal text-gray-400">Loading…</span>}
+          </h3>
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
             <input

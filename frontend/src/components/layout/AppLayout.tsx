@@ -1,7 +1,8 @@
 // frontend/src/components/layout/AppLayout.tsx
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useState, useEffect } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
+import { AIAssistantPanel } from '../AIAssistantPanel';
 import {
   HomeIcon,
   CubeIcon,
@@ -24,6 +25,18 @@ export const AppLayout = () => {
   const user = useAuthStore(state => state.user);
   const logout = useAuthStore(state => state.logout);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [aiOpen, setAIOpen] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'A') {
+        e.preventDefault();
+        setAIOpen(prev => !prev);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const navigationItems: NavItem[] = [
     { name: 'Dashboard', icon: <HomeIcon className="w-5 h-5" />, path: '/dashboard' },
@@ -89,7 +102,7 @@ export const AppLayout = () => {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white shadow-sm h-16 flex items-center px-6">
+        <header className="bg-white shadow-sm h-16 flex items-center px-6 justify-between">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="text-gray-500 hover:text-gray-700"
@@ -98,12 +111,26 @@ export const AppLayout = () => {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
+          <button
+            onClick={() => setAIOpen(prev => !prev)}
+            title="AI Engineering Assistant (Ctrl+Shift+A)"
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              aiOpen ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            AI Assistant
+          </button>
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
           <Outlet />
         </main>
       </div>
+
+      {aiOpen && <AIAssistantPanel onClose={() => setAIOpen(false)} />}
     </div>
   );
 };

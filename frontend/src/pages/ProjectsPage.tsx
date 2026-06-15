@@ -31,8 +31,8 @@ export default function ProjectsPage() {
 
   async function loadProjects() {
     try {
-      const response = await api.get('/api/projects');
-      setProjects(response.data);
+      const { data } = await api.getProjects();
+      setProjects(data);
     } catch (error) {
       console.error('Failed to load projects:', error);
     } finally {

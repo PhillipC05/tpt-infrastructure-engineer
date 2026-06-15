@@ -1,8 +1,17 @@
-{/* frontend/src/components/DashboardCharts.tsx */}
 import React from 'react';
-import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 
-const costData = [
+interface CostPoint { month: string; actual: number; budget: number; }
+interface TradePoint { name: string; value: number; color: string; }
+interface ProgressPoint { name: string; completed: number; total: number; }
+
+interface Props {
+  costData?: CostPoint[];
+  tradeBreakdown?: TradePoint[];
+  projectProgress?: ProgressPoint[];
+}
+
+const DEFAULT_COSTS: CostPoint[] = [
   { month: 'Jan', actual: 120000, budget: 115000 },
   { month: 'Feb', actual: 135000, budget: 130000 },
   { month: 'Mar', actual: 142000, budget: 145000 },
@@ -11,7 +20,7 @@ const costData = [
   { month: 'Jun', actual: 165000, budget: 170000 },
 ];
 
-const tradeBreakdown = [
+const DEFAULT_TRADES: TradePoint[] = [
   { name: 'Civil', value: 35, color: '#3b82f6' },
   { name: 'Structural', value: 25, color: '#10b981' },
   { name: 'Mechanical', value: 15, color: '#f59e0b' },
@@ -19,17 +28,20 @@ const tradeBreakdown = [
   { name: 'Finishes', value: 13, color: '#8b5cf6' },
 ];
 
-const projectProgress = [
+const DEFAULT_PROGRESS: ProgressPoint[] = [
   { name: 'Design', completed: 100, total: 100 },
   { name: 'Procurement', completed: 75, total: 100 },
   { name: 'Construction', completed: 32, total: 100 },
   { name: 'Testing', completed: 0, total: 100 },
 ];
 
-export const DashboardCharts: React.FC = () => {
+export const DashboardCharts: React.FC<Props> = ({
+  costData = DEFAULT_COSTS,
+  tradeBreakdown = DEFAULT_TRADES,
+  projectProgress = DEFAULT_PROGRESS,
+}) => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Cost Trend Chart */}
       <div className="bg-white p-5 rounded-lg border border-gray-200">
         <h4 className="font-semibold text-gray-900 mb-4">Cost Trend</h4>
         <ResponsiveContainer width="100%" height={250}>
@@ -45,7 +57,6 @@ export const DashboardCharts: React.FC = () => {
         </ResponsiveContainer>
       </div>
 
-      {/* Trade Breakdown */}
       <div className="bg-white p-5 rounded-lg border border-gray-200">
         <h4 className="font-semibold text-gray-900 mb-4">Trade Breakdown</h4>
         <ResponsiveContainer width="100%" height={250}>
@@ -69,7 +80,6 @@ export const DashboardCharts: React.FC = () => {
         </ResponsiveContainer>
       </div>
 
-      {/* Project Progress */}
       <div className="bg-white p-5 rounded-lg border border-gray-200 col-span-1 lg:col-span-2">
         <h4 className="font-semibold text-gray-900 mb-4">Project Progress</h4>
         <ResponsiveContainer width="100%" height={200}>

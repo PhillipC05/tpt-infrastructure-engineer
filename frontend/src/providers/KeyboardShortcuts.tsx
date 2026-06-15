@@ -83,6 +83,7 @@ export const KeyboardShortcutsProvider: React.FC<{ children: React.ReactNode }> 
 
       if ((isCtrlPressed || isMetaPressed) && e.key === 's') {
         e.preventDefault();
+        window.dispatchEvent(new CustomEvent('tpt:save'));
         toast.info('Saved successfully');
       }
 

@@ -1,495 +1,386 @@
-/**
- * Phase 7: Reporting & Documentation Module
- * Frontend Report Generator Component
- */
-
-import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Button,
-  Card,
-  CardContent,
-  FormControl,
-  Grid,
-  InputLabel,
-  MenuItem,
-  Select,
-  Typography,
-  Stepper,
-  Step,
-  StepLabel,
-  Paper,
-  Divider,
-  Chip,
-  Tabs,
-  Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-} from '@mui/material';
-import {
-  Description as DescriptionIcon,
-  PictureAsPdf as PdfIcon,
-  FilePresent as WordIcon,
-  TableChart as ExcelIcon,
-  Download as DownloadIcon,
-  CheckCircle as CheckCircleIcon,
-  Schedule as ScheduleIcon,
-  HowToReg as HowToRegIcon,
-} from '@mui/icons-material';
-
-enum ReportType {
-  FEASIBILITY = 'feasibility',
-  COST_ESTIMATE = 'cost_estimate',
-  TENDER_DOCUMENTATION = 'tender_documentation',
-  CONSTRUCTION_METHODOLOGY = 'construction_methodology',
-  COMPLIANCE = 'compliance',
-  SCHEDULE = 'schedule',
-  RISK_ASSESSMENT = 'risk_assessment',
-}
-
-enum ReportFormat {
-  PDF = 'pdf',
-  WORD = 'docx',
-  EXCEL = 'xlsx',
-  CSV = 'csv',
-  JSON = 'json',
-  HTML = 'html',
-}
-
-enum ReportStatus {
-  DRAFT = 'draft',
-  SUBMITTED = 'submitted',
-  UNDER_REVIEW = 'under_review',
-  APPROVED = 'approved',
-  REJECTED = 'rejected',
-}
+import { useState, useEffect } from 'react';
+import { api } from '../lib/api';
 
 interface ReportSection {
   section_id: string;
   title: string;
-  content: any;
   order: number;
-  visible: boolean;
   required: boolean;
 }
 
 interface ReportTemplate {
   template_id: string;
   name: string;
-  report_type: ReportType;
-  country_code?: string;
+  report_type: string;
   version: string;
   sections: ReportSection[];
 }
 
 interface GeneratedReport {
-  report_id: string;
-  project_id: string;
-  template_id: string;
+  id: string;
   title: string;
-  report_type: ReportType;
-  status: ReportStatus;
-  format: ReportFormat;
-  generated_by: string;
-  generated_at: string;
-  sections: ReportSection[];
+  report_type: string;
+  status: string;
+  format: string;
+  created_at: string;
 }
 
-const ReportGenerator: React.FC = () => {
-  const [activeStep, setActiveStep] = useState(0);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>('');
-  const [exportFormat, setExportFormat] = useState<ReportFormat>(ReportFormat.PDF);
-  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
-  const [generatedReport, setGeneratedReport] = useState<GeneratedReport | null>(null);
-  const [activeTab, setActiveTab] = useState(0);
-  const [reportData, setReportData] = useState<Record<string, any>>({});
+const FORMATS = ['json', 'csv', 'html'] as const;
+type Format = typeof FORMATS[number];
 
-  const steps = ['Select Template', 'Configure Report', 'Preview', 'Export & Approve'];
-
-  const reportTypeLabels: Record<ReportType, string> = {
-    [ReportType.FEASIBILITY]: 'Feasibility Report',
-    [ReportType.COST_ESTIMATE]: 'Cost Estimate',
-    [ReportType.TENDER_DOCUMENTATION]: 'Tender Documentation',
-    [ReportType.CONSTRUCTION_METHODOLOGY]: 'Construction Methodology',
-    [ReportType.COMPLIANCE]: 'Compliance Report',
-    [ReportType.SCHEDULE]: 'Schedule Report',
-    [ReportType.RISK_ASSESSMENT]: 'Risk Assessment',
-  };
-
-  const statusColors: Record<ReportStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
-    [ReportStatus.DRAFT]: 'default',
-    [ReportStatus.SUBMITTED]: 'primary',
-    [ReportStatus.UNDER_REVIEW]: 'warning',
-    [ReportStatus.APPROVED]: 'success',
-    [ReportStatus.REJECTED]: 'error',
-  };
-
-  useEffect(() => {
-    // Load templates from API
-    const loadTemplates = async () => {
-      // Mock data - would fetch from /api/reports/templates
-      const mockTemplates: ReportTemplate[] = [
-        {
-          template_id: 'feasibility_standard',
-          name: 'Standard Feasibility Report',
-          report_type: ReportType.FEASIBILITY,
-          version: '1.0.0',
-          sections: [
-            { section_id: 'executive_summary', title: 'Executive Summary', content: '', order: 1, visible: true, required: true },
-            { section_id: 'project_overview', title: 'Project Overview', content: '', order: 2, visible: true, required: true },
-            { section_id: 'site_assessment', title: 'Site Assessment', content: '', order: 3, visible: true, required: false },
-            { section_id: 'recommendations', title: 'Recommendations', content: '', order: 9, visible: true, required: true },
-            { section_id: 'conclusion', title: 'Conclusion', content: '', order: 10, visible: true, required: true },
-          ],
-        },
-        {
-          template_id: 'cost_estimate_standard',
-          name: 'Standard Cost Estimate Report',
-          report_type: ReportType.COST_ESTIMATE,
-          version: '1.0.0',
-          sections: [
-            { section_id: 'summary', title: 'Cost Summary', content: '', order: 1, visible: true, required: true },
-            { section_id: 'assumptions', title: 'Estimation Assumptions', content: '', order: 2, visible: true, required: true },
-            { section_id: 'materials_breakdown', title: 'Materials Breakdown', content: '', order: 3, visible: true, required: false },
-            { section_id: 'total_cost', title: 'Total Project Cost', content: '', order: 8, visible: true, required: true },
-          ],
-        },
-      ];
-      setTemplates(mockTemplates);
-    };
-    
-    loadTemplates();
-  }, []);
-
-  const selectedTemplateData = templates.find(t => t.template_id === selectedTemplate);
-
-  const handleGenerateReport = async () => {
-    // Mock API call to /api/reports/generate
-    const mockReport: GeneratedReport = {
-      report_id: `report_${Date.now()}`,
-      project_id: 'project_123',
-      template_id: selectedTemplate,
-      title: selectedTemplateData?.name || 'Generated Report',
-      report_type: selectedTemplateData?.report_type || ReportType.FEASIBILITY,
-      status: ReportStatus.DRAFT,
-      format: exportFormat,
-      generated_by: 'current_user',
-      generated_at: new Date().toISOString(),
-      sections: selectedTemplateData?.sections.map(s => ({
-        ...s,
-        content: reportData[s.section_id] || 'Sample content for ' + s.title,
-      })) || [],
-    };
-
-    setGeneratedReport(mockReport);
-    setActiveStep(2);
-  };
-
-  const handleExport = async () => {
-    // API call to /api/reports/export
-    alert(`Exporting report as ${exportFormat.toUpperCase()}`);
-  };
-
-  const handleSubmitForApproval = async () => {
-    if (generatedReport) {
-      setGeneratedReport({
-        ...generatedReport,
-        status: ReportStatus.SUBMITTED,
-      });
-    }
-  };
-
-  return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Report Generator
-      </Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-        Generate professional engineering reports, documentation and export to multiple formats
-      </Typography>
-
-      <Stepper activeStep={activeStep} sx={{ mb: 4 }}>
-        {steps.map((label) => (
-          <Step key={label}>
-            <StepLabel>{label}</StepLabel>
-          </Step>
-        ))}
-      </Stepper>
-
-      {activeStep === 0 && (
-        <Box>
-          <Typography variant="h6" gutterBottom>Select Report Template</Typography>
-          <Grid container spacing={3}>
-            {templates.map((template) => (
-              <Grid item xs={12} md={6} lg={4} key={template.template_id}>
-                <Card 
-                  variant="outlined"
-                  sx={{ 
-                    cursor: 'pointer',
-                    border: selectedTemplate === template.template_id ? 2 : 1,
-                    borderColor: selectedTemplate === template.template_id ? 'primary.main' : 'divider',
-                    '&:hover': { boxShadow: 2 }
-                  }}
-                  onClick={() => setSelectedTemplate(template.template_id)}
-                >
-                  <CardContent>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                      <DescriptionIcon sx={{ mr: 1, color: 'primary.main' }} />
-                      <Typography variant="h6">{template.name}</Typography>
-                    </Box>
-                    <Chip 
-                      label={reportTypeLabels[template.report_type]} 
-                      size="small" 
-                      sx={{ mb: 1 }}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                      {template.sections.length} sections
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Version {template.version}
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-          
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end' }}>
-            <Button
-              variant="contained"
-              disabled={!selectedTemplate}
-              onClick={() => setActiveStep(1)}
-            >
-              Continue
-            </Button>
-          </Box>
-        </Box>
-      )}
-
-      {activeStep === 1 && (
-        <Box>
-          <Typography variant="h6" gutterBottom>Configure Report</Typography>
-          
-          <Grid container spacing={3} sx={{ mb: 3 }}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Export Format</InputLabel>
-                <Select
-                  value={exportFormat}
-                  label="Export Format"
-                  onChange={(e) => setExportFormat(e.target.value as ReportFormat)}
-                >
-                  <MenuItem value={ReportFormat.PDF}><PdfIcon sx={{ mr: 1 }} /> PDF Document</MenuItem>
-                  <MenuItem value={ReportFormat.WORD}><WordIcon sx={{ mr: 1 }} /> Microsoft Word</MenuItem>
-                  <MenuItem value={ReportFormat.EXCEL}><ExcelIcon sx={{ mr: 1 }} /> Microsoft Excel</MenuItem>
-                  <MenuItem value={ReportFormat.CSV}>CSV Spreadsheet</MenuItem>
-                  <MenuItem value={ReportFormat.HTML}>HTML Document</MenuItem>
-                  <MenuItem value={ReportFormat.JSON}>JSON Data</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="subtitle1" gutterBottom>Report Sections</Typography>
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Section</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell align="right">Order</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {selectedTemplateData?.sections.sort((a,b) => a.order - b.order).map((section) => (
-                    <TableRow key={section.section_id}>
-                      <TableCell>{section.title}</TableCell>
-                      <TableCell>
-                        {section.required ? 
-                          <Chip label="Required" size="small" color="primary" /> : 
-                          <Chip label="Optional" size="small" />
-                        }
-                      </TableCell>
-                      <TableCell align="right">{section.order}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
-
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <Button onClick={() => setActiveStep(0)}>Back</Button>
-            <Button
-              variant="contained"
-              onClick={handleGenerateReport}
-            >
-              Generate Report
-            </Button>
-          </Box>
-        </Box>
-      )}
-
-      {activeStep === 2 && generatedReport && (
-        <Box>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h6">Report Preview</Typography>
-            <Chip 
-              label={generatedReport.status.toUpperCase()} 
-              color={statusColors[generatedReport.status]}
-            />
-          </Box>
-
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h5" gutterBottom>{generatedReport.title}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Report ID: {generatedReport.report_id}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Generated: {new Date(generatedReport.generated_at).toLocaleString()}
-            </Typography>
-            
-            <Divider sx={{ my: 3 }} />
-
-            {generatedReport.sections.sort((a,b) => a.order - b.order).map((section) => (
-              <Box key={section.section_id} sx={{ mb: 3 }}>
-                <Typography variant="h6" gutterBottom>{section.title}</Typography>
-                <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>
-                  {JSON.stringify(section.content, null, 2)}
-                </Typography>
-              </Box>
-            ))}
-          </Paper>
-
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <Button onClick={() => setActiveStep(1)}>Back</Button>
-            <Button
-              variant="contained"
-              onClick={() => setActiveStep(3)}
-            >
-              Continue to Export
-            </Button>
-          </Box>
-        </Box>
-      )}
-
-      {activeStep === 3 && generatedReport && (
-        <Box>
-          <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} sx={{ mb: 3 }}>
-            <Tab label="Export" />
-            <Tab label="Approval Workflow" />
-          </Tabs>
-
-          {activeTab === 0 && (
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Export Report</Typography>
-              
-              <Grid container spacing={2} sx={{ mb: 3 }}>
-                <Grid item>
-                  <Button
-                    variant="outlined"
-                    startIcon={<PdfIcon />}
-                    onClick={handleExport}
-                  >
-                    Export PDF
-                  </Button>
-                </Grid>
-                <Grid item>
-                  <Button
-                    variant="outlined"
-                    startIcon={<WordIcon />}
-                    onClick={handleExport}
-                  >
-                    Export Word
-                  </Button>
-                </Grid>
-                <Grid item>
-                  <Button
-                    variant="outlined"
-                    startIcon={<ExcelIcon />}
-                    onClick={handleExport}
-                  >
-                    Export Excel
-                  </Button>
-                </Grid>
-                <Grid item>
-                  <Button
-                    variant="outlined"
-                    startIcon={<DownloadIcon />}
-                    onClick={handleExport}
-                  >
-                    Download
-                  </Button>
-                </Grid>
-              </Grid>
-            </Paper>
-          )}
-
-          {activeTab === 1 && (
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="h6" gutterBottom>Approval Workflow</Typography>
-              
-              <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-                <Button
-                  variant="contained"
-                  startIcon={<ScheduleIcon />}
-                  onClick={handleSubmitForApproval}
-                  disabled={generatedReport.status !== ReportStatus.DRAFT}
-                >
-                  Submit for Approval
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<HowToRegIcon />}
-                  disabled={generatedReport.status !== ReportStatus.SUBMITTED}
-                >
-                  Approve Report
-                </Button>
-                <Button
-                  variant="outlined"
-                  color="error"
-                  disabled={generatedReport.status !== ReportStatus.SUBMITTED}
-                >
-                  Reject Report
-                </Button>
-              </Box>
-
-              {generatedReport.status !== ReportStatus.DRAFT && (
-                <Box sx={{ mt: 3 }}>
-                  <Typography variant="subtitle2">Current Status:</Typography>
-                  <Chip 
-                    label={generatedReport.status.toUpperCase()} 
-                    color={statusColors[generatedReport.status]}
-                    sx={{ mt: 1 }}
-                  />
-                </Box>
-              )}
-            </Paper>
-          )}
-
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'space-between' }}>
-            <Button onClick={() => setActiveStep(2)}>Back</Button>
-            <Button
-              variant="contained"
-              onClick={() => {
-                setActiveStep(0);
-                setGeneratedReport(null);
-                setSelectedTemplate('');
-              }}
-            >
-              Generate New Report
-            </Button>
-          </Box>
-        </Box>
-      )}
-
-    </Box>
-  );
+const STATUS_COLORS: Record<string, string> = {
+  draft: 'bg-gray-100 text-gray-700',
+  submitted: 'bg-blue-100 text-blue-700',
+  under_review: 'bg-yellow-100 text-yellow-700',
+  approved: 'bg-green-100 text-green-700',
+  rejected: 'bg-red-100 text-red-700',
 };
 
-export default ReportGenerator;
+const STEPS = ['Select Template', 'Configure', 'Preview', 'Export & Approve'];
+
+export default function ReportGenerator() {
+  const [step, setStep] = useState(0);
+  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [reports, setReports] = useState<GeneratedReport[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [exportFormat, setExportFormat] = useState<Format>('json');
+  const [generatedReport, setGeneratedReport] = useState<GeneratedReport | null>(null);
+  const [activeTab, setActiveTab] = useState<'export' | 'approval'>('export');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getReportTemplates().then(setTemplates).catch(() => {});
+    api.getReports().then(setReports).catch(() => {});
+  }, []);
+
+  const selectedTemplate = templates.find(t => t.template_id === selectedTemplateId);
+
+  async function handleGenerate() {
+    if (!selectedTemplate) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const report = await api.createReport({
+        title: selectedTemplate.name,
+        report_type: selectedTemplate.report_type,
+        format: exportFormat,
+        content: { template_id: selectedTemplateId },
+      });
+      setGeneratedReport(report);
+      setReports(prev => [report, ...prev]);
+      setStep(2);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? 'Failed to generate report.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSubmit() {
+    if (!generatedReport) return;
+    try {
+      const updated = await api.updateReportStatus(generatedReport.id, 'submitted');
+      setGeneratedReport(prev => prev ? { ...prev, status: updated.status } : prev);
+    } catch {
+      setError('Failed to submit report.');
+    }
+  }
+
+  function reset() {
+    setStep(0);
+    setGeneratedReport(null);
+    setSelectedTemplateId('');
+    setActiveTab('export');
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Report Generator</h1>
+        <p className="text-gray-500 mt-1">Generate professional engineering reports and export to multiple formats</p>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">{error}</div>
+      )}
+
+      {/* Stepper */}
+      <div className="flex items-center gap-0">
+        {STEPS.map((label, i) => (
+          <div key={label} className="flex items-center">
+            <div className="flex flex-col items-center">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium border-2 ${
+                i < step ? 'bg-blue-600 border-blue-600 text-white' :
+                i === step ? 'border-blue-600 text-blue-600' :
+                'border-gray-300 text-gray-400'
+              }`}>
+                {i < step ? '✓' : i + 1}
+              </div>
+              <span className={`text-xs mt-1 whitespace-nowrap ${i === step ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
+                {label}
+              </span>
+            </div>
+            {i < STEPS.length - 1 && (
+              <div className={`h-0.5 w-16 mx-1 mb-5 ${i < step ? 'bg-blue-600' : 'bg-gray-300'}`} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Step 0: Select Template */}
+      {step === 0 && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900">Select a Report Template</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templates.map(t => (
+              <button
+                key={t.template_id}
+                onClick={() => setSelectedTemplateId(t.template_id)}
+                className={`text-left p-4 rounded-lg border-2 transition-colors ${
+                  selectedTemplateId === t.template_id
+                    ? 'border-blue-600 bg-blue-50'
+                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 text-blue-500">
+                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">{t.name}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 capitalize">{t.report_type.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-gray-400 mt-1">{t.sections.length} sections · v{t.version}</p>
+                  </div>
+                </div>
+              </button>
+            ))}
+            {templates.length === 0 && (
+              <p className="text-gray-400 text-sm col-span-3">Loading templates…</p>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <button
+              disabled={!selectedTemplateId}
+              onClick={() => setStep(1)}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-40"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 1: Configure */}
+      {step === 1 && selectedTemplate && (
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900">Configure Report</h2>
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-gray-700">Export Format</label>
+            <select
+              value={exportFormat}
+              onChange={e => setExportFormat(e.target.value as Format)}
+              className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {FORMATS.map(f => (
+                <option key={f} value={f}>{f.toUpperCase()}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-700">
+              Report Sections
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-2 px-4 text-gray-500 font-medium">Section</th>
+                  <th className="text-left py-2 px-4 text-gray-500 font-medium">Required</th>
+                  <th className="text-right py-2 px-4 text-gray-500 font-medium">Order</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...selectedTemplate.sections].sort((a, b) => a.order - b.order).map(s => (
+                  <tr key={s.section_id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 px-4 text-gray-900">{s.title}</td>
+                    <td className="py-2 px-4">
+                      {s.required
+                        ? <span className="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700 rounded-full">Required</span>
+                        : <span className="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">Optional</span>
+                      }
+                    </td>
+                    <td className="py-2 px-4 text-right text-gray-500">{s.order}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex justify-between">
+            <button onClick={() => setStep(0)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Back</button>
+            <button
+              onClick={handleGenerate}
+              disabled={saving}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-40"
+            >
+              {saving ? 'Generating…' : 'Generate Report'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 2: Preview */}
+      {step === 2 && generatedReport && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Report Preview</h2>
+            <span className={`px-2 py-1 text-xs font-medium rounded-full ${STATUS_COLORS[generatedReport.status] ?? 'bg-gray-100 text-gray-700'}`}>
+              {generatedReport.status.replace(/_/g, ' ').toUpperCase()}
+            </span>
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-3">
+            <h3 className="text-xl font-semibold text-gray-900">{generatedReport.title}</h3>
+            <div className="text-sm text-gray-500 space-y-1">
+              <p>ID: {generatedReport.id}</p>
+              <p>Generated: {new Date(generatedReport.created_at).toLocaleString()}</p>
+              <p>Format: {generatedReport.format.toUpperCase()}</p>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-sm text-gray-600">Report created successfully. Configure content sections and proceed to export.</p>
+            </div>
+          </div>
+
+          <div className="flex justify-between">
+            <button onClick={() => setStep(1)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Back</button>
+            <button
+              onClick={() => setStep(3)}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
+            >
+              Continue to Export
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3: Export & Approve */}
+      {step === 3 && generatedReport && (
+        <div className="space-y-4">
+          <div className="flex border-b border-gray-200">
+            {(['export', 'approval'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px capitalize transition-colors ${
+                  activeTab === tab
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'export' && (
+            <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+              <h3 className="text-base font-medium text-gray-900">Export Report</h3>
+              <div className="flex flex-wrap gap-3">
+                {FORMATS.map(f => (
+                  <button
+                    key={f}
+                    onClick={() => alert(`Export as ${f.toUpperCase()} — connect to a backend export endpoint to download`)}
+                    className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
+                  >
+                    <svg className="h-4 w-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Export {f.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'approval' && (
+            <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+              <h3 className="text-base font-medium text-gray-900">Approval Workflow</h3>
+              <div className="flex items-center gap-3">
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${STATUS_COLORS[generatedReport.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                  {generatedReport.status.replace(/_/g, ' ').toUpperCase()}
+                </span>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleSubmit}
+                  disabled={generatedReport.status !== 'draft'}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-40"
+                >
+                  Submit for Approval
+                </button>
+                <button
+                  disabled={generatedReport.status !== 'submitted'}
+                  className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md hover:bg-gray-50 disabled:opacity-40"
+                >
+                  Approve
+                </button>
+                <button
+                  disabled={generatedReport.status !== 'submitted'}
+                  className="px-4 py-2 border border-red-300 text-red-600 text-sm font-medium rounded-md hover:bg-red-50 disabled:opacity-40"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-between">
+            <button onClick={() => setStep(2)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Back</button>
+            <button
+              onClick={reset}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
+            >
+              Generate New Report
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Reports */}
+      {reports.length > 0 && step === 0 && (
+        <div className="space-y-3">
+          <h2 className="text-base font-semibold text-gray-900">Recent Reports</h2>
+          <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50">
+                  <th className="text-left py-2 px-4 text-gray-500 font-medium">Title</th>
+                  <th className="text-left py-2 px-4 text-gray-500 font-medium">Type</th>
+                  <th className="text-left py-2 px-4 text-gray-500 font-medium">Status</th>
+                  <th className="text-left py-2 px-4 text-gray-500 font-medium">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.slice(0, 5).map(r => (
+                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-2 px-4 font-medium text-gray-900">{r.title}</td>
+                    <td className="py-2 px-4 text-gray-600 capitalize">{r.report_type.replace(/_/g, ' ')}</td>
+                    <td className="py-2 px-4">
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                        {r.status.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className="py-2 px-4 text-gray-500">{new Date(r.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
