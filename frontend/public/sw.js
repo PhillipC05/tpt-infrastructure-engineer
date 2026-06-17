@@ -1,4 +1,4 @@
-const CACHE = 'tpt-v1'
+const CACHE = 'tpt-v2'
 const OFFLINE_PAGE = '/index.html'
 
 const PRECACHE = [
@@ -26,6 +26,14 @@ self.addEventListener('activate', event => {
   )
 })
 
+function tryCacheResponse(request, response) {
+  if (!response.ok || response.type === 'opaque') return
+  try {
+    const clone = response.clone()
+    caches.open(CACHE).then(cache => cache.put(request, clone))
+  } catch {}
+}
+
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return
 
@@ -36,10 +44,7 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(event.request)
         .then(response => {
-          if (response.ok) {
-            const clone = response.clone()
-            caches.open(CACHE).then(cache => cache.put(event.request, clone))
-          }
+          tryCacheResponse(event.request, response)
           return response
         })
         .catch(() =>
@@ -60,15 +65,16 @@ self.addEventListener('fetch', event => {
       if (cached) return cached
       return fetch(event.request)
         .then(response => {
-          if (response.ok && response.type !== 'opaque') {
-            caches.open(CACHE).then(cache => cache.put(event.request, response.clone()))
-          }
+          tryCacheResponse(event.request, response)
           return response
         })
         .catch(() => {
           if (event.request.mode === 'navigate') {
-            return caches.match(OFFLINE_PAGE)
+            return caches.match(OFFLINE_PAGE).then(
+              r => r ?? new Response('Offline', { status: 503 })
+            )
           }
+          return new Response('', { status: 503 })
         })
     })
   )

@@ -17,19 +17,71 @@ interface Material {
   availability: 'in_stock' | 'limited' | 'order_only';
 }
 
+const EMPTY_FORM = {
+  name: '',
+  category: '',
+  unit: '',
+  unit_cost: '',
+  supplier: '',
+  grade: '',
+  availability: 'in_stock' as const,
+};
+
 export default function MaterialsPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
+    loadMaterials();
+  }, []);
+
+  function loadMaterials() {
     api.getMaterials()
       .then(({ data }) => setMaterials(data))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  function openModal() {
+    setForm(EMPTY_FORM);
+    setFormError(null);
+    setShowModal(true);
+  }
+
+  async function handleCreate() {
+    if (!form.name.trim()) { setFormError('Name is required.'); return; }
+    if (!form.category.trim()) { setFormError('Category is required.'); return; }
+    if (!form.unit.trim()) { setFormError('Unit is required.'); return; }
+    const cost = parseFloat(form.unit_cost);
+    if (isNaN(cost) || cost < 0) { setFormError('Enter a valid unit cost.'); return; }
+    setSaving(true);
+    setFormError(null);
+    try {
+      await api.createMaterial({
+        name: form.name.trim(),
+        category: form.category.trim(),
+        unit: form.unit.trim(),
+        unit_cost: cost,
+        supplier: form.supplier || 'Unknown',
+        grade: form.grade || undefined,
+        availability: form.availability,
+      });
+      setShowModal(false);
+      setLoading(true);
+      loadMaterials();
+    } catch (e: any) {
+      setFormError(e?.response?.data?.detail ?? 'Failed to add material.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const categories = ['all', ...Array.from(new Set(materials.map(m => m.category))).sort()];
 
@@ -54,7 +106,7 @@ export default function MaterialsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Materials Database</h1>
           <p className="text-gray-500 mt-1">Browse construction materials with pricing and properties</p>
         </div>
-        <Button variant="primary">Add Material</Button>
+        <Button variant="primary" onClick={openModal}>Add Material</Button>
       </div>
 
       {error && (
@@ -130,6 +182,74 @@ export default function MaterialsPage() {
               </CardContent>
             </Card>
           ))}
+        </div>
+      )}
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowModal(false)} />
+          <div className="relative bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Add Material</h2>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {formError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">{formError}</div>
+            )}
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name <span className="text-red-500">*</span></label>
+                <input type="text" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Concrete 30 MPa" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category <span className="text-red-500">*</span></label>
+                  <input type="text" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Concrete" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Unit <span className="text-red-500">*</span></label>
+                  <input type="text" value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} placeholder="e.g. m³" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost <span className="text-red-500">*</span></label>
+                  <input type="number" value={form.unit_cost} onChange={e => setForm(f => ({ ...f, unit_cost: e.target.value }))} placeholder="0.00" min="0" step="0.01" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+                  <input type="text" value={form.supplier} onChange={e => setForm(f => ({ ...f, supplier: e.target.value }))} placeholder="Supplier name" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Grade</label>
+                  <input type="text" value={form.grade} onChange={e => setForm(f => ({ ...f, grade: e.target.value }))} placeholder="e.g. 30 MPa" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Availability</label>
+                  <select value={form.availability} onChange={e => setForm(f => ({ ...f, availability: e.target.value as any }))} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="in_stock">In Stock</option>
+                    <option value="limited">Limited</option>
+                    <option value="order_only">Order Only</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+              <button onClick={handleCreate} disabled={saving} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50">
+                {saving ? 'Adding…' : 'Add Material'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

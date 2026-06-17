@@ -22,7 +22,7 @@ class UserRole(PyEnum):
     VIEWER = "viewer"
 
 
-user_role_enum = ENUM(UserRole, name="user_role", create_type=True)
+user_role_enum = ENUM(UserRole, name="user_role", create_type=True, values_callable=lambda obj: [e.value for e in obj])
 
 
 class Organisation(Base):

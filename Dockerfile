@@ -43,6 +43,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=backend-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=backend-builder /usr/local/bin /usr/local/bin
 
+# Add backend to Python path so bare imports (from models import ...) resolve
+ENV PYTHONPATH=/app/backend
+
 # Copy application code
 COPY backend/ ./backend/
 COPY alembic/ ./alembic/

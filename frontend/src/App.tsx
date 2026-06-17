@@ -1,4 +1,5 @@
 // frontend/src/App.tsx
+import { lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppProviders } from './providers/AppProviders';
 import { AppLayout } from './components/layout/AppLayout';
@@ -7,18 +8,19 @@ import { LoginPage } from './pages/LoginPage';
 import { ToastContainer } from './components/ToastContainer';
 import DashboardPage from './pages/DashboardPage';
 import ProjectsPage from './pages/ProjectsPage';
-import EstimatorPage from './pages/EstimatorPage';
-import SchedulePage from './pages/SchedulePage';
-import MaterialsPage from './pages/MaterialsPage';
-import FeasibilityPage from './pages/FeasibilityPage';
-import ReportsPage from './pages/ReportsPage';
-import ProcurementPage from './pages/ProcurementPage';
-import DrawingsPage from './pages/DrawingsPage';
-import Viewer3DPage from './pages/Viewer3DPage';
-import SettingsPage from './pages/SettingsPage';
-import DroneSurveyPage from './pages/DroneSurveyPage';
-import DigitalTwinPage from './pages/DigitalTwinPage';
-import QRSignsPage from './pages/QRSignsPage';
+
+const EstimatorPage   = lazy(() => import('./pages/EstimatorPage'));
+const SchedulePage    = lazy(() => import('./pages/SchedulePage'));
+const MaterialsPage   = lazy(() => import('./pages/MaterialsPage'));
+const FeasibilityPage = lazy(() => import('./pages/FeasibilityPage'));
+const ReportsPage     = lazy(() => import('./pages/ReportsPage'));
+const ProcurementPage = lazy(() => import('./pages/ProcurementPage'));
+const DrawingsPage    = lazy(() => import('./pages/DrawingsPage'));
+const Viewer3DPage    = lazy(() => import('./pages/Viewer3DPage'));
+const SettingsPage    = lazy(() => import('./pages/SettingsPage'));
+const DroneSurveyPage = lazy(() => import('./pages/DroneSurveyPage'));
+const DigitalTwinPage = lazy(() => import('./pages/DigitalTwinPage'));
+const QRSignsPage     = lazy(() => import('./pages/QRSignsPage'));
 
 function App() {
   return (

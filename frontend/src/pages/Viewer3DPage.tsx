@@ -4,8 +4,24 @@ import { Button } from '../components/ui/Button';
 
 export default function Viewer3DPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const ifcInputRef = useRef<HTMLInputElement>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<'perspective' | 'top' | 'front' | 'side'>('perspective');
   const [zoom, setZoom] = useState(100);
+
+  function resetView() {
+    setViewMode('perspective');
+    setZoom(100);
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  }
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -56,8 +72,10 @@ export default function Viewer3DPage() {
           <p className="text-gray-500 mt-1">BIM and 3D model visualisation</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline">Import IFC</Button>
-          <Button variant="primary">Upload Model</Button>
+          <input ref={ifcInputRef} type="file" accept=".ifc" className="hidden" onChange={e => { if (e.target.files?.[0]) alert(`Loading IFC: ${e.target.files[0].name}`); e.target.value = ''; }} />
+          <input ref={modelInputRef} type="file" accept=".ifc,.obj,.gltf,.glb" className="hidden" onChange={e => { if (e.target.files?.[0]) alert(`Uploading: ${e.target.files[0].name}`); e.target.value = ''; }} />
+          <Button variant="outline" onClick={() => ifcInputRef.current?.click()}>Import IFC</Button>
+          <Button variant="primary" onClick={() => modelInputRef.current?.click()}>Upload Model</Button>
         </div>
       </div>
 
@@ -74,12 +92,12 @@ export default function Viewer3DPage() {
         ))}
         <Button variant="outline" size="sm" onClick={() => setZoom(Math.max(50, zoom - 10))}>Zoom -</Button>
         <Button variant="outline" size="sm" onClick={() => setZoom(Math.min(200, zoom + 10))}>Zoom +</Button>
-        <Button variant="outline" size="sm">Reset View</Button>
-        <Button variant="outline" size="sm">Fullscreen</Button>
+        <Button variant="outline" size="sm" onClick={resetView}>Reset View</Button>
+        <Button variant="outline" size="sm" onClick={toggleFullscreen}>Fullscreen</Button>
       </div>
 
       <Card className="p-0 overflow-hidden">
-        <div className="relative bg-gray-100" style={{ height: '480px' }}>
+        <div ref={containerRef} className="relative bg-gray-100" style={{ height: '480px' }}>
           <canvas
             ref={canvasRef}
             width={800}

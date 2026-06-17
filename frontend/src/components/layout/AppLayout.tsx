@@ -1,5 +1,5 @@
 // frontend/src/components/layout/AppLayout.tsx
-import { type ReactNode, useState, useEffect } from 'react';
+import { type ReactNode, useState, useEffect, Suspense } from 'react';
 import { useNavigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { AIAssistantPanel } from '../AIAssistantPanel';
@@ -149,7 +149,13 @@ export const AppLayout = () => {
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
-          <Outlet />
+          <Suspense fallback={
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+            </div>
+          }>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

@@ -9,17 +9,34 @@ This application runs perfectly on standard desktop computers:
 
 ### Quick Start on Desktop
 1. Install **Docker Desktop** (free download from docker.com)
-2. Open terminal in project folder
-3. Run:
+2. Open terminal in the project root folder
+3. Create your environment file:
+   ```bash
+   cp backend/.env.example .env
+   # Edit .env and set a real SECRET_KEY — generate one with:
+   # python -c "import secrets; print(secrets.token_hex(32))"
+   ```
+4. Build the frontend:
+   ```bash
+   cd frontend && npm install && npm run build && cd ..
+   ```
+5. Start the stack:
    ```bash
    docker compose up -d
    ```
-4. Open browser at: **http://localhost:8000**
+6. Open browser at: **http://localhost:5173**
+
+> **Subsequent starts** (no code changes): just `docker compose up -d`
+> **After code changes**: re-run `npm run build` in `frontend/`, then `docker compose up -d`
+
+| URL | Purpose |
+|---|---|
+| http://localhost:5173 | Application (frontend) |
+| http://localhost:8000/docs | Backend API docs |
+| http://localhost:8000/api/health | Health check |
 
 ✅ Works on Windows 10+, MacOS 12+, Ubuntu 20.04+
-✅ No programming knowledge required
-✅ Runs completely locally - no cloud required
-✅ All data stays on your computer
+✅ No cloud required — all data stays on your computer
 
 ---
 

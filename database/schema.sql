@@ -45,7 +45,8 @@ CREATE TABLE users (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     last_login_at TIMESTAMP WITH TIME ZONE,
     is_active BOOLEAN DEFAULT TRUE,
-    email_verified BOOLEAN DEFAULT FALSE
+    email_verified BOOLEAN DEFAULT FALSE,
+    email_notifications_enabled BOOLEAN DEFAULT TRUE
 );
 
 CREATE TABLE user_permissions (
@@ -92,7 +93,8 @@ CREATE TABLE projects (
     description TEXT,
     project_number VARCHAR(100),
     status VARCHAR(50) DEFAULT 'draft',
-    location GEOGRAPHY(Point, 4326),
+    latitude FLOAT,
+    longitude FLOAT,
     country_code CHAR(2),
     client_name VARCHAR(255),
     start_date DATE,
@@ -129,7 +131,7 @@ CREATE TABLE project_versions (
 );
 
 -- ==================================================
--- PROJECT ACTIVITY
+-- PROJECT ACTIVITY, COMMENTS & ATTACHMENTS
 -- ==================================================
 
 CREATE TABLE project_activities (
@@ -138,7 +140,7 @@ CREATE TABLE project_activities (
     user_id UUID REFERENCES users(id) ON DELETE SET NULL,
     activity_type VARCHAR(100) NOT NULL,
     content TEXT,
-    metadata JSONB,
+    activity_metadata JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -174,6 +176,40 @@ CREATE TABLE project_attachments (
 );
 
 CREATE INDEX idx_attachments_project ON project_attachments(project_id);
+
+-- ==================================================
+-- NOTIFICATIONS & MENTIONS
+-- ==================================================
+
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    notification_type VARCHAR(100) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    entity_type VARCHAR(100),
+    entity_id UUID,
+    sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    notification_metadata JSONB,
+    is_read BOOLEAN DEFAULT FALSE,
+    read_at TIMESTAMP WITH TIME ZONE,
+    sent_email BOOLEAN DEFAULT FALSE,
+    sent_push BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_notifications_user ON notifications(user_id);
+
+CREATE TABLE user_mentions (
+    id BIGSERIAL PRIMARY KEY,
+    comment_id BIGINT REFERENCES project_comments(id) ON DELETE CASCADE NOT NULL,
+    mentioned_user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    mentioned_by_user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+    notification_sent BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
 -- ==================================================
 -- DESIGNS
@@ -225,6 +261,115 @@ CREATE TABLE validation_rules (
 );
 
 -- ==================================================
+-- MATERIALS
+-- ==================================================
+
+CREATE TABLE materials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    unit VARCHAR(20) NOT NULL,
+    unit_cost NUMERIC(15,4) NOT NULL,
+    supplier VARCHAR(255),
+    grade VARCHAR(100),
+    carbon_footprint NUMERIC(10,4),
+    availability VARCHAR(50) DEFAULT 'in_stock',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    is_archived BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX idx_materials_organisation ON materials(organisation_id);
+
+-- ==================================================
+-- SCHEDULE, ESTIMATES & PROCUREMENT
+-- ==================================================
+
+CREATE TABLE schedule_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+    organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    duration INTEGER,
+    progress INTEGER DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'not_started',
+    dependencies TEXT[],
+    assignee VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_schedule_tasks_project ON schedule_tasks(project_id);
+
+CREATE TABLE estimate_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+    organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE NOT NULL,
+    description VARCHAR(500) NOT NULL,
+    quantity NUMERIC(15,4) NOT NULL,
+    unit VARCHAR(20) NOT NULL,
+    rate NUMERIC(15,4) NOT NULL,
+    amount NUMERIC(15,2) NOT NULL,
+    category VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_estimate_items_project ON estimate_items(project_id);
+
+CREATE TABLE purchase_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+    organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE NOT NULL,
+    po_number VARCHAR(100) NOT NULL,
+    supplier_name VARCHAR(255) NOT NULL,
+    status VARCHAR(50) DEFAULT 'draft',
+    total_value NUMERIC(15,2) DEFAULT 0,
+    line_items JSONB DEFAULT '[]',
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_purchase_orders_project ON purchase_orders(project_id);
+
+CREATE TABLE bills_of_materials (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+    organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    line_items JSONB DEFAULT '[]',
+    total_value NUMERIC(15,2) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_boms_project ON bills_of_materials(project_id);
+
+-- ==================================================
+-- REPORTS
+-- ==================================================
+
+CREATE TABLE generated_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    organisation_id UUID REFERENCES organisations(id) ON DELETE CASCADE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    report_type VARCHAR(100) NOT NULL,
+    status VARCHAR(50) DEFAULT 'draft',
+    format VARCHAR(20) DEFAULT 'json',
+    content JSONB DEFAULT '{}',
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_reports_organisation ON generated_reports(organisation_id);
+
+-- ==================================================
 -- REAL TIME COLLABORATION
 -- ==================================================
 
@@ -249,8 +394,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER update_organisations_modtime BEFORE UPDATE ON organisations FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_users_modtime BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_projects_modtime BEFORE UPDATE ON projects FOR EACH ROW EXECUTE FUNCTION update_modified_column();
-CREATE TRIGGER update_organisations_modtime BEFORE UPDATE ON organisations FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_designs_modtime BEFORE UPDATE ON designs FOR EACH ROW EXECUTE FUNCTION update_modified_column();
 CREATE TRIGGER update_comments_modtime BEFORE UPDATE ON project_comments FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_materials_modtime BEFORE UPDATE ON materials FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_schedule_tasks_modtime BEFORE UPDATE ON schedule_tasks FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_estimate_items_modtime BEFORE UPDATE ON estimate_items FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_purchase_orders_modtime BEFORE UPDATE ON purchase_orders FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_bills_of_materials_modtime BEFORE UPDATE ON bills_of_materials FOR EACH ROW EXECUTE FUNCTION update_modified_column();
+CREATE TRIGGER update_generated_reports_modtime BEFORE UPDATE ON generated_reports FOR EACH ROW EXECUTE FUNCTION update_modified_column();

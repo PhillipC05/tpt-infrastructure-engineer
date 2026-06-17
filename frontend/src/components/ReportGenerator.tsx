@@ -58,9 +58,14 @@ export default function ReportGenerator() {
   const [activeTab, setActiveTab] = useState<'export' | 'approval'>('export');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getReportTemplates().then(setTemplates).catch(() => {});
+    api.getReportTemplates()
+      .then(setTemplates)
+      .catch(() => setTemplatesError('Failed to load templates. Please refresh the page.'))
+      .finally(() => setTemplatesLoading(false));
     api.getReports().then(r => setReports(r.data)).catch(() => {});
   }, []);
 
@@ -142,7 +147,17 @@ export default function ReportGenerator() {
       {step === 0 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-gray-900">Select a Report Template</h2>
+          {templatesError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">{templatesError}</div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {templatesLoading && (
+              <div className="col-span-3 flex items-center gap-2 text-gray-400 text-sm py-4">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400" />
+                Loading templates…
+              </div>
+            )}
             {templates.map(t => (
               <button
                 key={t.template_id}
@@ -167,8 +182,8 @@ export default function ReportGenerator() {
                 </div>
               </button>
             ))}
-            {templates.length === 0 && (
-              <p className="text-gray-400 text-sm col-span-3">Loading templates…</p>
+            {!templatesLoading && templates.length === 0 && !templatesError && (
+              <p className="text-gray-400 text-sm col-span-3">No templates available.</p>
             )}
           </div>
           <div className="flex justify-end">

@@ -72,7 +72,7 @@ const MaterialsDatabase: React.FC = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [token]);
+  }, []);
 
   const categories = Object.values(MaterialCategory);
   const filteredMaterials = BASE_MATERIALS.filter(m =>

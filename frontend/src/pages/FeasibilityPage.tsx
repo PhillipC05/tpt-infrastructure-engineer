@@ -11,6 +11,8 @@ interface FactorScore {
 }
 
 export default function FeasibilityPage() {
+  const [analysing, setAnalysing] = useState(false);
+  const [lastRun, setLastRun] = useState<string | null>(null);
   const [factors] = useState<FactorScore[]>([
     { name: 'Geotechnical Suitability', score: 78, max: 100, status: 'pass', notes: 'Suitable founding conditions identified' },
     { name: 'Environmental Impact', score: 56, max: 100, status: 'warning', notes: 'Minor vegetation clearance required' },
@@ -24,6 +26,14 @@ export default function FeasibilityPage() {
   const overallScore = Math.round(factors.reduce((sum, f) => sum + (f.score / f.max) * 100, 0) / factors.length);
   const passCount = factors.filter(f => f.status === 'pass').length;
   const warningCount = factors.filter(f => f.status === 'warning').length;
+
+  function runAnalysis() {
+    setAnalysing(true);
+    setTimeout(() => {
+      setAnalysing(false);
+      setLastRun(new Date().toLocaleTimeString());
+    }, 1500);
+  }
 
   const statusColors = {
     pass: 'bg-green-100 text-green-700 border-green-200',
@@ -44,9 +54,10 @@ export default function FeasibilityPage() {
           <h1 className="text-2xl font-bold text-gray-900">Feasibility Analysis</h1>
           <p className="text-gray-500 mt-1">Site assessment and risk analysis</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline">Export Report</Button>
-          <Button variant="primary">Run Analysis</Button>
+        <div className="flex gap-2 items-center">
+          {lastRun && <span className="text-xs text-gray-400">Last run: {lastRun}</span>}
+          <Button variant="outline" onClick={() => window.print()}>Export Report</Button>
+          <Button variant="primary" onClick={runAnalysis} isLoading={analysing}>Run Analysis</Button>
         </div>
       </div>
 

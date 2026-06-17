@@ -3,7 +3,7 @@
 An end-to-end infrastructure engineering platform for project management, cost estimation, scheduling, CAD/BIM workflows, and real-time collaboration. Built for civil engineers, project managers, quantity surveyors, and contractors.
 
 [![CI](https://github.com/PhillipC05/tpt-infrastructure-engineer/actions/workflows/ci.yml/badge.svg)](https://github.com/PhillipC05/tpt-infrastructure-engineer/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 ---
 
@@ -214,4 +214,4 @@ See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
-[MIT](LICENSE) © 2026 TPT Solutions
+[Apache 2.0](LICENSE) © 2026 TPT Solutions

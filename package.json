@@ -8,7 +8,7 @@
   },
   "keywords": ["infrastructure", "engineering", "fastapi", "react", "typescript", "postgis"],
   "author": "Phillip T",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "commonjs",
   "dependencies": {
     "@headlessui/react": "^2.2.10",

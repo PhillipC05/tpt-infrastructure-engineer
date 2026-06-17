@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -17,7 +17,12 @@ interface Drawing {
   file_size: number;
 }
 
+const EMPTY_DRAWING = { name: '', drawing_type: 'civil' as const };
+
 export default function DrawingsPage() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [newDrawing, setNewDrawing] = useState(EMPTY_DRAWING);
   const [drawings] = useState<Drawing[]>([
     {
       id: '1',
@@ -90,8 +95,9 @@ export default function DrawingsPage() {
           <p className="text-gray-500 mt-1">Manage CAD drawings and BIM models</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline">Import DXF/DWG</Button>
-          <Button variant="primary">New Drawing</Button>
+          <input ref={fileInputRef} type="file" accept=".dxf,.dwg,.ifc" className="hidden" onChange={e => { if (e.target.files?.[0]) alert(`Importing: ${e.target.files[0].name}`); e.target.value = ''; }} />
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>Import DXF/DWG</Button>
+          <Button variant="primary" onClick={() => { setNewDrawing(EMPTY_DRAWING); setShowModal(true); }}>New Drawing</Button>
         </div>
       </div>
 
@@ -154,6 +160,41 @@ export default function DrawingsPage() {
           </table>
         </div>
       </Card>
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowModal(false)} />
+          <div className="relative bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">New Drawing</h2>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Drawing Name</label>
+                <input type="text" value={newDrawing.name} onChange={e => setNewDrawing(d => ({ ...d, name: e.target.value }))} placeholder="e.g. Site Layout Plan" className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                <select value={newDrawing.drawing_type} onChange={e => setNewDrawing(d => ({ ...d, drawing_type: e.target.value as any }))} className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value="architectural">Architectural</option>
+                  <option value="structural">Structural</option>
+                  <option value="civil">Civil</option>
+                  <option value="mechanical">Mechanical</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">Create Drawing</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

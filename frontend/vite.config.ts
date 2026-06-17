@@ -13,4 +13,14 @@ export default defineConfig({
       '/auth': 'http://localhost:8000',
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/three')) return 'vendor-three';
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/react-is')) return 'vendor-charts';
+        },
+      },
+    },
+  },
 })
