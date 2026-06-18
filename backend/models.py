@@ -392,3 +392,36 @@ class GeneratedReport(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Digital Twin — sensor definitions and time-series readings
+# ---------------------------------------------------------------------------
+class SensorDefinition(Base):
+    __tablename__ = "sensor_definitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    label = Column(String(255), nullable=False)
+    unit = Column(String(50), nullable=False, default='')
+    warning_high = Column(Numeric(15, 4))
+    critical_high = Column(Numeric(15, 4))
+    warning_low = Column(Numeric(15, 4))
+    critical_low = Column(Numeric(15, 4))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    readings = relationship("SensorReading", back_populates="sensor", cascade="all, delete-orphan")
+
+
+class SensorReading(Base):
+    __tablename__ = "sensor_readings"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    sensor_id = Column(UUID(as_uuid=True), ForeignKey("sensor_definitions.id", ondelete="CASCADE"), nullable=False)
+    value = Column(Numeric(15, 4), nullable=False)
+    recorded_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    sensor = relationship("SensorDefinition", back_populates="readings")

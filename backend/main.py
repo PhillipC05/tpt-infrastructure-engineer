@@ -24,7 +24,7 @@ from models import (
     Base, User, Project, Organisation, ProjectVersion, UserPermission, UserRole,
     ProjectAttachment, ProjectComment, Notification, UserMention,
     Material, ScheduleTask, EstimateItem, PurchaseOrder, BillOfMaterials, GeneratedReport,
-    Design, DesignAlternative,
+    Design, DesignAlternative, SensorDefinition, SensorReading,
 )
 from notifications import NotificationService
 from auth import (
@@ -113,7 +113,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "X-Request-ID"],
     expose_headers=["X-Total-Count", "X-Request-ID"]
 )
@@ -1271,44 +1271,567 @@ async def get_boms(
     items = db.query(BillOfMaterials).filter(
         BillOfMaterials.organisation_id == current_user.organisation_id
     ).order_by(BillOfMaterials.created_at.desc()).offset(skip).limit(limit).all()
-    return [
+    return [_bom_dict(b) for b in items]
+
+
+def _bom_dict(b: BillOfMaterials) -> dict:
+    return {
+        "id": str(b.id), "title": b.title,
+        "project_id": str(b.project_id),
+        "line_items": b.line_items or [],
+        "total_value": float(b.total_value),
+        "created_at": b.created_at.isoformat(),
+    }
+
+
+@app.post("/api/procurement/boms", status_code=201)
+async def create_bom_from_estimate(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    project_id = data.get("project_id")
+    title = data.get("title")
+    if not project_id or not title:
+        raise HTTPException(status_code=422, detail="project_id and title are required")
+
+    project = db.query(Project).filter(
+        Project.id == str(project_id),
+        Project.organisation_id == current_user.organisation_id,
+        Project.is_archived == False,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    estimate_items = db.query(EstimateItem).filter(
+        EstimateItem.project_id == str(project_id)
+    ).all()
+
+    line_items = [
         {
-            "id": str(b.id), "title": b.title,
-            "project_id": str(b.project_id),
-            "line_items": b.line_items or [],
-            "total_value": float(b.total_value),
-            "created_at": b.created_at.isoformat(),
+            "description": item.description,
+            "quantity": float(item.quantity),
+            "unit": item.unit,
+            "unit_price": float(item.rate),
+            "total": float(item.amount),
+            "category": item.category or "",
         }
-        for b in items
+        for item in estimate_items
     ]
+    total = sum(float(item.amount) for item in estimate_items)
+
+    bom = BillOfMaterials(
+        project_id=str(project_id),
+        organisation_id=current_user.organisation_id,
+        title=str(title),
+        line_items=line_items,
+        total_value=total,
+    )
+    db.add(bom)
+    db.commit()
+    db.refresh(bom)
+    return _bom_dict(bom)
+
+
+@app.post("/api/procurement/boms/{bom_id}/create-po", status_code=201)
+async def create_po_from_bom(
+    bom_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    bom = db.query(BillOfMaterials).filter(
+        BillOfMaterials.id == bom_id,
+        BillOfMaterials.organisation_id == current_user.organisation_id
+    ).first()
+    if not bom:
+        raise HTTPException(status_code=404, detail="BOM not found")
+
+    supplier_name = data.get("supplier_name", "").strip()
+    if not supplier_name:
+        raise HTTPException(status_code=422, detail="supplier_name is required")
+
+    from datetime import datetime as _dt
+    po_number = data.get("po_number") or f"PO-{_dt.utcnow().strftime('%Y%m%d%H%M')}"
+
+    po = PurchaseOrder(
+        project_id=str(bom.project_id),
+        organisation_id=current_user.organisation_id,
+        po_number=str(po_number),
+        supplier_name=supplier_name,
+        status="draft",
+        total_value=float(bom.total_value) if bom.total_value else 0,
+        line_items=bom.line_items or [],
+        created_by=current_user.id,
+    )
+    db.add(po)
+    db.commit()
+    db.refresh(po)
+    return _po_dict(po)
 
 
 # ------------------------------
 # Reports
 # ------------------------------
 REPORT_TEMPLATES = [
-    {"template_id": "feasibility_standard", "name": "Standard Feasibility Report", "report_type": "feasibility",
-     "version": "1.0.0", "sections": [
-         {"section_id": "executive_summary", "title": "Executive Summary", "order": 1, "required": True},
-         {"section_id": "project_overview", "title": "Project Overview", "order": 2, "required": True},
-         {"section_id": "site_assessment", "title": "Site Assessment", "order": 3, "required": False},
-         {"section_id": "recommendations", "title": "Recommendations", "order": 9, "required": True},
-         {"section_id": "conclusion", "title": "Conclusion", "order": 10, "required": True},
-     ]},
-    {"template_id": "cost_estimate_standard", "name": "Standard Cost Estimate", "report_type": "cost_estimate",
-     "version": "1.0.0", "sections": [
-         {"section_id": "summary", "title": "Cost Summary", "order": 1, "required": True},
-         {"section_id": "assumptions", "title": "Estimation Assumptions", "order": 2, "required": True},
-         {"section_id": "materials_breakdown", "title": "Materials Breakdown", "order": 3, "required": False},
-         {"section_id": "total_cost", "title": "Total Project Cost", "order": 8, "required": True},
-     ]},
-    {"template_id": "risk_assessment", "name": "Risk Assessment Report", "report_type": "risk_assessment",
-     "version": "1.0.0", "sections": [
-         {"section_id": "risk_register", "title": "Risk Register", "order": 1, "required": True},
-         {"section_id": "mitigation", "title": "Mitigation Strategies", "order": 2, "required": True},
-         {"section_id": "residual_risk", "title": "Residual Risk Summary", "order": 3, "required": True},
-     ]},
+    {
+        "template_id": "feasibility_standard",
+        "name": "Standard Feasibility Report",
+        "report_type": "feasibility",
+        "version": "1.1.0",
+        "sections": [
+            {"section_id": "executive_summary",    "title": "Executive Summary",              "order": 1,  "required": True},
+            {"section_id": "project_overview",     "title": "Project Overview",               "order": 2,  "required": True},
+            {"section_id": "site_assessment",      "title": "Site Assessment",                "order": 3,  "required": False},
+            {"section_id": "geotechnical_analysis","title": "Geotechnical Analysis",          "order": 4,  "required": False},
+            {"section_id": "environmental_impact", "title": "Environmental Impact Assessment","order": 5,  "required": False},
+            {"section_id": "cost_analysis",        "title": "Cost Analysis",                  "order": 6,  "required": False},
+            {"section_id": "schedule_analysis",    "title": "Schedule Analysis",              "order": 7,  "required": False},
+            {"section_id": "risk_assessment",      "title": "Risk Assessment",                "order": 8,  "required": False},
+            {"section_id": "recommendations",      "title": "Recommendations",               "order": 9,  "required": True},
+            {"section_id": "conclusion",           "title": "Conclusion",                    "order": 10, "required": True},
+        ],
+    },
+    {
+        "template_id": "cost_estimate_standard",
+        "name": "Standard Cost Estimate Report",
+        "report_type": "cost_estimate",
+        "version": "1.1.0",
+        "sections": [
+            {"section_id": "summary",             "title": "Cost Summary",            "order": 1, "required": True},
+            {"section_id": "assumptions",         "title": "Estimation Assumptions",  "order": 2, "required": True},
+            {"section_id": "materials_breakdown", "title": "Materials Breakdown",     "order": 3, "required": False},
+            {"section_id": "labour_breakdown",    "title": "Labour Breakdown",        "order": 4, "required": False},
+            {"section_id": "plant_equipment",     "title": "Plant & Equipment",       "order": 5, "required": False},
+            {"section_id": "overheads",           "title": "Overheads & Margin",      "order": 6, "required": False},
+            {"section_id": "contingency",         "title": "Contingency Allowance",   "order": 7, "required": False},
+            {"section_id": "total_cost",          "title": "Total Project Cost",      "order": 8, "required": True},
+        ],
+    },
+    {
+        "template_id": "tender_standard",
+        "name": "Standard Tender Documentation",
+        "report_type": "tender_documentation",
+        "version": "1.1.0",
+        "sections": [
+            {"section_id": "invitation",             "title": "Invitation to Tender",     "order": 1, "required": True},
+            {"section_id": "scope",                  "title": "Scope of Works",            "order": 2, "required": True},
+            {"section_id": "specifications",         "title": "Technical Specifications",  "order": 3, "required": False},
+            {"section_id": "pricing_schedule",       "title": "Pricing Schedule",          "order": 4, "required": False},
+            {"section_id": "conditions",             "title": "Contract Conditions",       "order": 5, "required": False},
+            {"section_id": "submission_requirements","title": "Submission Requirements",   "order": 6, "required": True},
+        ],
+    },
+    {
+        "template_id": "risk_assessment_standard",
+        "name": "Risk Assessment Report",
+        "report_type": "risk_assessment",
+        "version": "1.1.0",
+        "sections": [
+            {"section_id": "risk_register", "title": "Risk Register",          "order": 1, "required": True},
+            {"section_id": "mitigation",    "title": "Mitigation Strategies",  "order": 2, "required": True},
+            {"section_id": "residual_risk", "title": "Residual Risk Summary",  "order": 3, "required": True},
+        ],
+    },
+    {
+        "template_id": "compliance_standard",
+        "name": "Regulatory Compliance Report",
+        "report_type": "compliance",
+        "version": "1.1.0",
+        "sections": [
+            {"section_id": "regulatory_overview","title": "Regulatory Framework Overview","order": 1, "required": False},
+            {"section_id": "compliance_checklist","title": "Compliance Checklist",        "order": 2, "required": True},
+            {"section_id": "code_adherence",     "title": "Building Code Adherence",     "order": 3, "required": False},
+            {"section_id": "certifications",     "title": "Required Certifications",     "order": 4, "required": False},
+            {"section_id": "approval_pathway",   "title": "Approval Pathway",            "order": 5, "required": False},
+        ],
+    },
+    {
+        "template_id": "trade_breakdown_standard",
+        "name": "Trade Breakdown Report",
+        "report_type": "trade_breakdown",
+        "version": "1.1.0",
+        "sections": [
+            {"section_id": "summary",      "title": "Trade Summary",      "order": 1,  "required": True},
+            {"section_id": "civil",        "title": "Civil Works",        "order": 2,  "required": False},
+            {"section_id": "structural",   "title": "Structural Works",   "order": 3,  "required": False},
+            {"section_id": "architectural","title": "Architectural Works","order": 4,  "required": False},
+            {"section_id": "mechanical",   "title": "Mechanical Works",   "order": 5,  "required": False},
+            {"section_id": "electrical",   "title": "Electrical Works",   "order": 6,  "required": False},
+            {"section_id": "plumbing",     "title": "Plumbing & Drainage","order": 7,  "required": False},
+            {"section_id": "external",     "title": "External Works",     "order": 8,  "required": False},
+            {"section_id": "labour_summary","title": "Labour Summary",    "order": 9,  "required": False},
+            {"section_id": "programme",    "title": "Trade Programme",    "order": 10, "required": True},
+        ],
+    },
 ]
+
+_TEMPLATE_MAP = {t["template_id"]: t for t in REPORT_TEMPLATES}
+
+
+def _build_section_content(
+    section_id: str,
+    project,
+    estimate_items: list,
+    schedule_tasks: list,
+) -> dict:
+    """Return a typed content dict for a single report section."""
+
+    # ── helpers ─────────────────────────────────────────────────────────────
+    def _est_rows(items):
+        return [
+            {
+                "description": i.description,
+                "quantity": float(i.quantity),
+                "unit": i.unit,
+                "rate": float(i.rate),
+                "amount": float(i.amount),
+                "category": i.category or "",
+            }
+            for i in items
+        ]
+
+    def _est_by_category(items):
+        cats: dict = {}
+        for i in items:
+            cat = (i.category or "General").title()
+            cats.setdefault(cat, {"subtotal": 0.0, "items": []})
+            cats[cat]["items"].append(_est_rows([i])[0])
+            cats[cat]["subtotal"] = round(cats[cat]["subtotal"] + float(i.amount), 2)
+        return cats
+
+    def _filter_cat(keywords: list):
+        kw = [k.lower() for k in keywords]
+        return [i for i in estimate_items if any(k in (i.category or "").lower() for k in kw)]
+
+    total_cost = sum(float(i.amount) for i in estimate_items)
+    pname = project.name if project else "This Project"
+    client = project.client_name or "—" if project else "—"
+
+    # ── section mapping ──────────────────────────────────────────────────────
+    if section_id == "executive_summary":
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"This report provides a comprehensive assessment of {pname}.",
+                f"The project is currently at status '{(project.status or 'draft').replace('_', ' ')}' "
+                f"with a total estimated construction cost of ${total_cost:,.2f} NZD." if total_cost else
+                f"The project is currently at status '{(project.status or 'draft').replace('_', ' ')}'.",
+                "This document has been prepared for review and approval by authorised personnel.",
+            ],
+        }
+
+    if section_id == "project_overview":
+        return {
+            "type": "project_info",
+            "fields": [
+                {"label": "Project Name",    "value": project.name if project else "—"},
+                {"label": "Project Number",  "value": project.project_number or "—" if project else "—"},
+                {"label": "Client",          "value": client},
+                {"label": "Status",          "value": (project.status or "—").replace("_", " ").title() if project else "—"},
+                {"label": "Start Date",      "value": str(project.start_date) if project and project.start_date else "—"},
+                {"label": "End Date",        "value": str(project.end_date) if project and project.end_date else "—"},
+                {"label": "Budget",          "value": f"${float(project.budget):,.2f} NZD" if project and project.budget else "—"},
+                {"label": "Description",     "value": project.description or "—" if project else "—"},
+            ],
+        }
+
+    if section_id == "site_assessment":
+        return {
+            "type": "project_info",
+            "fields": [
+                {"label": "Country", "value": project.country_code or "—" if project else "—"},
+                {"label": "Latitude",  "value": str(project.latitude)  if project and project.latitude  else "—"},
+                {"label": "Longitude", "value": str(project.longitude) if project and project.longitude else "—"},
+            ],
+            "note": "Detailed geospatial site assessment data should be attached as a separate survey report.",
+        }
+
+    if section_id in ("geotechnical_analysis", "environmental_impact"):
+        label = "Geotechnical" if section_id == "geotechnical_analysis" else "Environmental Impact"
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"{label} assessment for {pname}.",
+                "A detailed investigation report should be referenced here. "
+                "Key findings, soil classifications, bearing capacity, and any contamination data "
+                "should be summarised in this section.",
+            ],
+        }
+
+    if section_id in ("summary", "cost_analysis"):
+        by_cat = _est_by_category(estimate_items)
+        return {
+            "type": "cost_summary",
+            "total": round(total_cost, 2),
+            "item_count": len(estimate_items),
+            "by_category": by_cat,
+            "items": _est_rows(estimate_items),
+        }
+
+    if section_id == "materials_breakdown":
+        items = _filter_cat(["material", "materials", "supply", "supplies", "hardware", "concrete", "steel"])
+        if not items:
+            items = estimate_items
+        return {"type": "estimate_table", "items": _est_rows(items), "total": round(sum(float(i.amount) for i in items), 2)}
+
+    if section_id == "labour_breakdown":
+        items = _filter_cat(["labour", "labor", "subcontract", "install"])
+        return {"type": "estimate_table", "items": _est_rows(items), "total": round(sum(float(i.amount) for i in items), 2)}
+
+    if section_id == "plant_equipment":
+        items = _filter_cat(["plant", "equipment", "machinery", "hire", "crane"])
+        return {"type": "estimate_table", "items": _est_rows(items), "total": round(sum(float(i.amount) for i in items), 2)}
+
+    if section_id == "overheads":
+        items = _filter_cat(["overhead", "margin", "profit", "preliminary", "prelim", "management"])
+        return {"type": "estimate_table", "items": _est_rows(items), "total": round(sum(float(i.amount) for i in items), 2)}
+
+    if section_id == "contingency":
+        contingency_pct = 0.10
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"A contingency allowance of {int(contingency_pct * 100)}% has been applied to the base estimate.",
+                f"Base estimate: ${total_cost:,.2f} NZD",
+                f"Contingency ({int(contingency_pct * 100)}%): ${total_cost * contingency_pct:,.2f} NZD",
+                f"Total including contingency: ${total_cost * (1 + contingency_pct):,.2f} NZD",
+            ],
+        }
+
+    if section_id == "total_cost":
+        return {
+            "type": "cost_summary",
+            "total": round(total_cost, 2),
+            "item_count": len(estimate_items),
+            "by_category": _est_by_category(estimate_items),
+            "items": _est_rows(estimate_items),
+        }
+
+    if section_id == "assumptions":
+        return {
+            "type": "text",
+            "paragraphs": [
+                "The following assumptions have been made in preparing this cost estimate:",
+                "• All rates are in New Zealand Dollars (NZD) and are exclusive of GST unless otherwise stated.",
+                "• Unit rates are based on current market conditions and may vary subject to tender.",
+                "• Quantities are based on preliminary design drawings and are subject to revision.",
+                "• Ground conditions are assumed to be suitable for standard construction methods.",
+                "• No allowance has been made for contaminated material removal unless specifically noted.",
+            ],
+        }
+
+    if section_id in ("schedule_analysis", "programme"):
+        tasks = [
+            {
+                "name": t.name,
+                "start_date": str(t.start_date),
+                "end_date": str(t.end_date),
+                "duration": t.duration,
+                "progress": t.progress,
+                "status": t.status,
+                "assignee": t.assignee or "—",
+            }
+            for t in schedule_tasks
+        ]
+        return {"type": "schedule_table", "tasks": tasks}
+
+    if section_id == "risk_assessment":
+        return {
+            "type": "risk_table",
+            "risks": [
+                {"id": "R01", "description": "Ground conditions worse than anticipated", "likelihood": "Medium", "consequence": "High",   "rating": "High",   "mitigation": "Detailed geotechnical investigation prior to construction"},
+                {"id": "R02", "description": "Material cost escalation",                "likelihood": "Medium", "consequence": "Medium", "rating": "Medium", "mitigation": "Lock in material prices early; include contingency"},
+                {"id": "R03", "description": "Programme delays due to weather",         "likelihood": "Medium", "consequence": "Medium", "rating": "Medium", "mitigation": "Build weather delays into programme; monitor forecasts"},
+                {"id": "R04", "description": "Utility conflicts during excavation",     "likelihood": "Low",    "consequence": "High",   "rating": "Medium", "mitigation": "Engage utility locators before breaking ground"},
+                {"id": "R05", "description": "Resource availability",                   "likelihood": "Low",    "consequence": "Medium", "rating": "Low",    "mitigation": "Early subcontractor engagement and programme planning"},
+            ],
+        }
+
+    if section_id == "risk_register":
+        return {
+            "type": "risk_table",
+            "risks": [
+                {"id": "R01", "description": "Ground conditions worse than anticipated", "likelihood": "Medium", "consequence": "High",   "rating": "High",   "mitigation": "Detailed geotechnical investigation"},
+                {"id": "R02", "description": "Material cost escalation",                "likelihood": "Medium", "consequence": "Medium", "rating": "Medium", "mitigation": "Early procurement and contingency allocation"},
+                {"id": "R03", "description": "Programme delays",                        "likelihood": "Medium", "consequence": "Medium", "rating": "Medium", "mitigation": "Detailed programme monitoring and float management"},
+                {"id": "R04", "description": "Utility strikes",                        "likelihood": "Low",    "consequence": "High",   "rating": "Medium", "mitigation": "Utility location and permit to dig procedures"},
+                {"id": "R05", "description": "Resource shortages",                     "likelihood": "Low",    "consequence": "Medium", "rating": "Low",    "mitigation": "Early subcontractor engagement"},
+            ],
+        }
+
+    if section_id == "mitigation":
+        return {
+            "type": "text",
+            "paragraphs": [
+                "The following mitigation strategies have been identified to manage the risks outlined in the Risk Register.",
+                "Each mitigation measure will be owned by a nominated team member and tracked throughout the project.",
+                "Risk reviews will be conducted at each project milestone to update the register as the project evolves.",
+            ],
+        }
+
+    if section_id == "residual_risk":
+        return {
+            "type": "text",
+            "paragraphs": [
+                "Following implementation of all identified mitigation strategies, the residual risk profile of the project is considered ACCEPTABLE.",
+                "The most significant residual risk remains ground conditions, which will be managed through an ongoing monitoring plan.",
+                "No risks have been assessed as requiring escalation to executive leadership at this stage.",
+            ],
+        }
+
+    if section_id == "recommendations":
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"Based on the findings of this report, the following recommendations are made for {pname}:",
+                "1. Proceed to detailed design with the preferred option, subject to geotechnical confirmation.",
+                "2. Engage a quantity surveyor to confirm and refine cost estimates at detailed design stage.",
+                "3. Initiate resource consenting process in parallel with detailed design to minimise programme delays.",
+                "4. Establish a project governance structure including a project steering group and key stakeholder representatives.",
+            ],
+        }
+
+    if section_id == "conclusion":
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"This report has assessed the feasibility of {pname} from technical, cost, and programme perspectives.",
+                "The project is considered technically feasible and commercially viable subject to the recommendations outlined above.",
+                "Approval is sought to proceed to the next phase of project development.",
+            ],
+        }
+
+    if section_id == "invitation":
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"{client} invites suitably qualified and experienced contractors to submit a tender for the {pname}.",
+                "Tenders must be submitted in accordance with the instructions contained in this tender document.",
+                f"All enquiries should be directed to the project team. Site visits can be arranged upon request.",
+            ],
+        }
+
+    if section_id == "scope":
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"The scope of works for {pname} includes:",
+                project.description or "Refer to project drawings and specifications for full scope of works.",
+                "The Contractor shall supply all labour, materials, plant, and equipment necessary to complete the works.",
+            ],
+        }
+
+    if section_id in ("specifications", "conditions", "submission_requirements", "pricing_schedule"):
+        labels = {
+            "specifications":          "Technical Specifications",
+            "conditions":              "Contract Conditions",
+            "submission_requirements": "Submission Requirements",
+            "pricing_schedule":        "Pricing Schedule",
+        }
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"{labels[section_id]} for {pname}.",
+                "This section should be completed with the relevant contract or specification document.",
+                "Refer to attached schedules and drawings for detailed requirements.",
+            ],
+        }
+
+    # Compliance
+    if section_id == "regulatory_overview":
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"This report assesses compliance of {pname} with applicable New Zealand legislation, standards, and guidelines.",
+                "Key regulatory instruments include the Building Act 2004, Resource Management Act 1991, Health and Safety at Work Act 2015, "
+                "and the relevant New Zealand Standards (NZS) series.",
+            ],
+        }
+
+    if section_id == "compliance_checklist":
+        return {
+            "type": "checklist",
+            "items": [
+                {"item": "Building consent obtained or applied for",       "status": "pending"},
+                {"item": "Resource consent obtained or not required",      "status": "pending"},
+                {"item": "Health & Safety plan prepared",                  "status": "pending"},
+                {"item": "Engineer to the Contract appointed",             "status": "pending"},
+                {"item": "NZS 3404 structural steel compliance confirmed", "status": "pending"},
+                {"item": "NZS 3101 concrete compliance confirmed",         "status": "pending"},
+                {"item": "Utility notifications submitted",                "status": "pending"},
+                {"item": "Environmental management plan prepared",         "status": "pending"},
+            ],
+        }
+
+    if section_id in ("code_adherence", "certifications", "approval_pathway"):
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"This section documents {section_id.replace('_', ' ').title()} requirements for {pname}.",
+                "Detailed compliance documentation should be appended to this report.",
+            ],
+        }
+
+    # Trade breakdown sections
+    trade_map = {
+        "civil":        ["civil", "earthwork", "drainage", "roading", "pavement"],
+        "structural":   ["structural", "concrete", "steel", "foundation", "piling"],
+        "architectural":["architectural", "cladding", "roofing", "joinery", "fitout"],
+        "mechanical":   ["mechanical", "hvac", "ventilation", "fire", "sprinkler"],
+        "electrical":   ["electrical", "lighting", "switchboard", "data", "power"],
+        "plumbing":     ["plumbing", "drainage", "sanitary", "water supply"],
+        "external":     ["external", "landscaping", "paving", "fencing", "carpark"],
+    }
+
+    if section_id in trade_map:
+        items = _filter_cat(trade_map[section_id])
+        trade_name = section_id.replace("_", " ").title()
+        return {
+            "type": "estimate_table",
+            "label": f"{trade_name} — estimate items matching this trade",
+            "items": _est_rows(items),
+            "total": round(sum(float(i.amount) for i in items), 2),
+        }
+
+    if section_id == "labour_summary":
+        items = _filter_cat(["labour", "labor", "subcontract"])
+        return {"type": "estimate_table", "items": _est_rows(items), "total": round(sum(float(i.amount) for i in items), 2)}
+
+    if section_id in ("method_statement", "safety_plan", "quality_control", "site_layout", "work_sequence"):
+        labels2 = {
+            "method_statement": "Method Statement",
+            "safety_plan":      "Health & Safety Plan",
+            "quality_control":  "Quality Control Measures",
+            "site_layout":      "Site Layout Plan",
+            "work_sequence":    "Construction Work Sequence",
+        }
+        return {
+            "type": "text",
+            "paragraphs": [
+                f"{labels2.get(section_id, section_id.replace('_', ' ').title())} for {pname}.",
+                "This section should be completed with the relevant method statement, safety plan, or quality document.",
+            ],
+        }
+
+    # fallback
+    return {"type": "text", "paragraphs": [f"Content for section '{section_id}' for {pname}."]}
+
+
+def _report_dict(r: GeneratedReport, include_content: bool = False) -> dict:
+    d = {
+        "id": str(r.id),
+        "title": r.title,
+        "report_type": r.report_type,
+        "status": r.status,
+        "format": r.format,
+        "project_id": str(r.project_id) if r.project_id else None,
+        "created_at": r.created_at.isoformat(),
+        "updated_at": r.updated_at.isoformat(),
+    }
+    if include_content:
+        d["content"] = r.content or {}
+    return d
 
 
 @app.get("/api/reports/templates")
@@ -1318,22 +1841,44 @@ async def get_report_templates(current_user: User = Depends(get_current_user)):
 
 @app.get("/api/reports")
 async def get_reports(
-    skip: int = 0, limit: int = 50,
+    skip: int = 0, limit: int = 100,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     items = db.query(GeneratedReport).filter(
         GeneratedReport.organisation_id == current_user.organisation_id
     ).order_by(GeneratedReport.created_at.desc()).offset(skip).limit(limit).all()
+
+    # Attach project names in one query
+    project_ids = list({str(r.project_id) for r in items if r.project_id})
+    project_names: dict = {}
+    if project_ids:
+        projs = db.query(Project.id, Project.name).filter(Project.id.in_(project_ids)).all()
+        project_names = {str(p.id): p.name for p in projs}
+
     return [
-        {
-            "id": str(r.id), "title": r.title, "report_type": r.report_type,
-            "status": r.status, "format": r.format,
-            "project_id": str(r.project_id) if r.project_id else None,
-            "created_at": r.created_at.isoformat(),
-        }
+        {**_report_dict(r), "project_name": project_names.get(str(r.project_id), "—")}
         for r in items
     ]
+
+
+@app.get("/api/reports/{report_id}")
+async def get_report(
+    report_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    r = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.organisation_id == current_user.organisation_id
+    ).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Report not found")
+    result = {**_report_dict(r, include_content=True)}
+    if r.project_id:
+        proj = db.query(Project).filter(Project.id == str(r.project_id)).first()
+        result["project_name"] = proj.name if proj else "—"
+    return result
 
 
 @app.post("/api/reports", status_code=201)
@@ -1342,23 +1887,126 @@ async def create_report(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    project_id = data.get("project_id")
+    template_id = data.get("template_id") or (data.get("content", {}) or {}).get("template_id")
+    title = (data.get("title") or "").strip()
+    selected_sections: list = data.get("selected_sections") or (data.get("content", {}) or {}).get("sections") or []
+    report_type = data.get("report_type", "")
+
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    if not project_id:
+        raise HTTPException(status_code=422, detail="project_id is required")
+
+    project = db.query(Project).filter(
+        Project.id == str(project_id),
+        Project.organisation_id == current_user.organisation_id,
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Infer report_type from template if not supplied
+    template_meta = _TEMPLATE_MAP.get(template_id or "")
+    if not report_type and template_meta:
+        report_type = template_meta["report_type"]
+
+    # Pull project data for content population
+    estimate_items = db.query(EstimateItem).filter(
+        EstimateItem.project_id == str(project_id)
+    ).order_by(EstimateItem.created_at).all()
+
+    schedule_tasks = db.query(ScheduleTask).filter(
+        ScheduleTask.project_id == str(project_id)
+    ).order_by(ScheduleTask.start_date).all()
+
+    # Determine which sections to include
+    if not selected_sections and template_meta:
+        selected_sections = [s["section_id"] for s in template_meta["sections"]]
+
+    sections_content: dict = {}
+    for sid in selected_sections:
+        sections_content[sid] = _build_section_content(sid, project, estimate_items, schedule_tasks)
+
+    content = {
+        "template_id": template_id,
+        "selected_sections": selected_sections,
+        "sections": sections_content,
+    }
+
     report = GeneratedReport(
         organisation_id=current_user.organisation_id,
-        project_id=data.get("project_id"),
-        title=data["title"],
-        report_type=data["report_type"],
+        project_id=str(project_id),
+        title=title,
+        report_type=report_type,
         status="draft",
-        format=data.get("format", "json"),
-        content=data.get("content", {}),
+        format=data.get("format", "html"),
+        content=content,
         created_by=current_user.id,
     )
     db.add(report)
     db.commit()
     db.refresh(report)
-    return {"id": str(report.id), "title": report.title, "report_type": report.report_type,
-            "status": report.status, "format": report.format,
-            "project_id": str(report.project_id) if report.project_id else None,
-            "created_at": report.created_at.isoformat()}
+    result = {**_report_dict(report, include_content=True), "project_name": project.name}
+    return result
+
+
+@app.delete("/api/reports/{report_id}", status_code=204)
+async def delete_report(
+    report_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    r = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.organisation_id == current_user.organisation_id
+    ).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Report not found")
+    db.delete(r)
+    db.commit()
+
+
+@app.post("/api/reports/{report_id}/approve", status_code=200)
+async def approve_report(
+    report_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    r = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.organisation_id == current_user.organisation_id
+    ).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if r.status not in ("submitted", "under_review"):
+        raise HTTPException(status_code=400, detail=f"Cannot approve a report with status '{r.status}'")
+    r.status = "approved"
+    db.commit()
+    return _report_dict(r)
+
+
+@app.post("/api/reports/{report_id}/reject", status_code=200)
+async def reject_report(
+    report_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    r = db.query(GeneratedReport).filter(
+        GeneratedReport.id == report_id,
+        GeneratedReport.organisation_id == current_user.organisation_id
+    ).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if r.status not in ("submitted", "under_review"):
+        raise HTTPException(status_code=400, detail=f"Cannot reject a report with status '{r.status}'")
+    reason = (data.get("reason") or "").strip()
+    content = dict(r.content or {})
+    content["rejection_reason"] = reason
+    r.content = content
+    r.status = "rejected"
+    db.commit()
+    return _report_dict(r)
 
 
 @app.patch("/api/reports/{report_id}/status")
@@ -1367,15 +2015,234 @@ async def update_report_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    report = db.query(GeneratedReport).filter(
+    r = db.query(GeneratedReport).filter(
         GeneratedReport.id == report_id,
         GeneratedReport.organisation_id == current_user.organisation_id
     ).first()
-    if not report:
+    if not r:
         raise HTTPException(status_code=404, detail="Report not found")
-    report.status = data.get("status", report.status)
+    r.status = data.get("status", r.status)
     db.commit()
-    return {"id": str(report.id), "status": report.status}
+    return {"id": str(r.id), "status": r.status}
+
+
+# ------------------------------
+# Digital Twin — sensors & readings
+# ------------------------------
+def _sensor_dict(s: SensorDefinition) -> dict:
+    return {
+        "id": str(s.id),
+        "label": s.label,
+        "unit": s.unit,
+        "project_id": str(s.project_id) if s.project_id else None,
+        "warning_high": float(s.warning_high) if s.warning_high is not None else None,
+        "critical_high": float(s.critical_high) if s.critical_high is not None else None,
+        "warning_low": float(s.warning_low) if s.warning_low is not None else None,
+        "critical_low": float(s.critical_low) if s.critical_low is not None else None,
+        "is_active": s.is_active,
+        "created_at": s.created_at.isoformat(),
+    }
+
+
+@app.get("/api/digital-twin/sensors")
+async def get_sensors(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    sensors = db.query(SensorDefinition).filter(
+        SensorDefinition.organisation_id == current_user.organisation_id,
+        SensorDefinition.is_active == True,
+    ).order_by(SensorDefinition.created_at.asc()).all()
+    return [_sensor_dict(s) for s in sensors]
+
+
+@app.post("/api/digital-twin/sensors", status_code=201)
+async def create_sensor(
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    label = str(data.get("label", "")).strip()
+    unit = str(data.get("unit", "")).strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="label is required")
+
+    project_id = data.get("project_id")
+    if project_id:
+        proj = db.query(Project).filter(
+            Project.id == str(project_id),
+            Project.organisation_id == current_user.organisation_id,
+        ).first()
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    sensor = SensorDefinition(
+        organisation_id=current_user.organisation_id,
+        project_id=str(project_id) if project_id else None,
+        label=label,
+        unit=unit,
+        warning_high=data.get("warning_high"),
+        critical_high=data.get("critical_high"),
+        warning_low=data.get("warning_low"),
+        critical_low=data.get("critical_low"),
+    )
+    db.add(sensor)
+    db.commit()
+    db.refresh(sensor)
+    return _sensor_dict(sensor)
+
+
+@app.delete("/api/digital-twin/sensors/{sensor_id}", status_code=204)
+async def delete_sensor(
+    sensor_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    sensor = db.query(SensorDefinition).filter(
+        SensorDefinition.id == sensor_id,
+        SensorDefinition.organisation_id == current_user.organisation_id,
+    ).first()
+    if not sensor:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+    db.delete(sensor)
+    db.commit()
+
+
+@app.get("/api/digital-twin/sensors/{sensor_id}/readings")
+async def get_sensor_readings(
+    sensor_id: str,
+    limit: int = 60,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    sensor = db.query(SensorDefinition).filter(
+        SensorDefinition.id == sensor_id,
+        SensorDefinition.organisation_id == current_user.organisation_id,
+    ).first()
+    if not sensor:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+
+    readings = (
+        db.query(SensorReading)
+        .filter(SensorReading.sensor_id == sensor_id)
+        .order_by(SensorReading.recorded_at.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    return [
+        {"id": r.id, "value": float(r.value), "recorded_at": r.recorded_at.isoformat()}
+        for r in reversed(readings)
+    ]
+
+
+@app.post("/api/digital-twin/sensors/{sensor_id}/readings", status_code=201)
+async def add_sensor_reading(
+    sensor_id: str,
+    data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    sensor = db.query(SensorDefinition).filter(
+        SensorDefinition.id == sensor_id,
+        SensorDefinition.organisation_id == current_user.organisation_id,
+    ).first()
+    if not sensor:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+
+    value = data.get("value")
+    if value is None:
+        raise HTTPException(status_code=422, detail="value is required")
+
+    recorded_at_raw = data.get("recorded_at")
+    if recorded_at_raw:
+        from datetime import timezone
+        try:
+            from datetime import datetime as _dt2
+            recorded_at = _dt2.fromisoformat(str(recorded_at_raw).replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid recorded_at format. Use ISO 8601.")
+    else:
+        from datetime import datetime as _dt2, timezone
+        recorded_at = _dt2.now(timezone.utc)
+
+    reading = SensorReading(sensor_id=sensor_id, value=float(value), recorded_at=recorded_at)
+    db.add(reading)
+    db.commit()
+    db.refresh(reading)
+    return {"id": reading.id, "value": float(reading.value), "recorded_at": reading.recorded_at.isoformat()}
+
+
+@app.post("/api/digital-twin/import")
+async def import_sensor_data(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    CSV format: sensor_id,value,recorded_at
+    recorded_at is optional (ISO 8601). sensor_id must belong to this organisation.
+    Returns counts of rows imported and any errors.
+    """
+    import csv
+    import io
+    from datetime import datetime as _dt3, timezone as _tz
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=422, detail="Only CSV files are accepted")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=422, detail="File must be UTF-8 encoded")
+
+    # Verify org owns all referenced sensors up-front
+    org_sensor_ids = {
+        str(s.id)
+        for s in db.query(SensorDefinition.id).filter(
+            SensorDefinition.organisation_id == current_user.organisation_id
+        ).all()
+    }
+
+    reader = csv.DictReader(io.StringIO(text))
+    required_cols = {"sensor_id", "value"}
+    if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
+        raise HTTPException(
+            status_code=422,
+            detail=f"CSV must have columns: sensor_id, value (and optionally recorded_at). Found: {reader.fieldnames}"
+        )
+
+    imported, errors = 0, []
+    for i, row in enumerate(reader, start=2):
+        sensor_id = row.get("sensor_id", "").strip()
+        raw_value = row.get("value", "").strip()
+        raw_ts = row.get("recorded_at", "").strip()
+
+        if sensor_id not in org_sensor_ids:
+            errors.append(f"Row {i}: sensor_id '{sensor_id}' not found or not in your organisation")
+            continue
+        try:
+            value = float(raw_value)
+        except (ValueError, TypeError):
+            errors.append(f"Row {i}: invalid value '{raw_value}'")
+            continue
+
+        if raw_ts:
+            try:
+                recorded_at = _dt3.fromisoformat(raw_ts.replace("Z", "+00:00"))
+            except ValueError:
+                errors.append(f"Row {i}: invalid recorded_at '{raw_ts}'")
+                continue
+        else:
+            recorded_at = _dt3.now(_tz.utc)
+
+        db.add(SensorReading(sensor_id=sensor_id, value=value, recorded_at=recorded_at))
+        imported += 1
+
+    if imported > 0:
+        db.commit()
+
+    return {"imported": imported, "errors": errors}
 
 
 @app.get("/api/activity")

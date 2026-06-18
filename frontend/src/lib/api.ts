@@ -299,13 +299,73 @@ export const api = {
     return { data: response.data, total: getTotal(response) };
   },
 
-  async getReports(skip = 0, limit = 50): Promise<{ data: any[]; total: number }> {
+  async createBom(payload: { project_id: string; title: string }): Promise<any> {
+    const { data } = await client.post('/api/procurement/boms', payload);
+    return data;
+  },
+
+  async createPoFromBom(bomId: string, payload: { supplier_name: string; po_number?: string }): Promise<any> {
+    const { data } = await client.post(`/api/procurement/boms/${bomId}/create-po`, payload);
+    return data;
+  },
+
+  async getSensors(): Promise<any[]> {
+    const { data } = await client.get('/api/digital-twin/sensors');
+    return data;
+  },
+
+  async createSensor(payload: Record<string, unknown>): Promise<any> {
+    const { data } = await client.post('/api/digital-twin/sensors', payload);
+    return data;
+  },
+
+  async deleteSensor(id: string): Promise<void> {
+    await client.delete(`/api/digital-twin/sensors/${id}`);
+  },
+
+  async getSensorReadings(sensorId: string, limit = 60): Promise<any[]> {
+    const { data } = await client.get(`/api/digital-twin/sensors/${sensorId}/readings`, { params: { limit } });
+    return data;
+  },
+
+  async addSensorReading(sensorId: string, payload: { value: number; recorded_at?: string }): Promise<any> {
+    const { data } = await client.post(`/api/digital-twin/sensors/${sensorId}/readings`, payload);
+    return data;
+  },
+
+  async importSensorData(formData: FormData): Promise<any> {
+    const { data } = await client.post('/api/digital-twin/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
+
+  async getReports(skip = 0, limit = 100): Promise<{ data: any[]; total: number }> {
     const response = await client.get('/api/reports', { params: { skip, limit } });
     return { data: response.data, total: getTotal(response) };
   },
 
+  async getReport(id: string): Promise<any> {
+    const { data } = await client.get(`/api/reports/${id}`);
+    return data;
+  },
+
   async createReport(payload: Record<string, unknown>): Promise<any> {
     const { data } = await client.post('/api/reports', payload);
+    return data;
+  },
+
+  async deleteReport(id: string): Promise<void> {
+    await client.delete(`/api/reports/${id}`);
+  },
+
+  async approveReport(id: string): Promise<any> {
+    const { data } = await client.post(`/api/reports/${id}/approve`);
+    return data;
+  },
+
+  async rejectReport(id: string, reason: string): Promise<any> {
+    const { data } = await client.post(`/api/reports/${id}/reject`, { reason });
     return data;
   },
 
