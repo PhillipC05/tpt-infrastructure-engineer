@@ -88,7 +88,7 @@ export const AppLayout = () => {
               onClick={() => navigate(item.path)}
               className="w-full flex items-center px-3 py-2 text-gray-700 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors"
             >
-              <span className="flex-shrink-0">{item.icon}</span>
+              <span className="shrink-0">{item.icon}</span>
               {sidebarOpen && <span className="ml-3 text-sm">{item.name}</span>}
             </button>
           ))}
